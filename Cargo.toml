@@ -1,5 +1,5 @@
 [package]
-name = "storage"
+name = "norfs"
 version = "0.0.0"
 edition = "2021"
 description = "Wear-leveling filesystem for embedded systems"
