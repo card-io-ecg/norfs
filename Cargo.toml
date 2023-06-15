@@ -4,6 +4,9 @@ version = "0.0.0"
 edition = "2021"
 description = "Wear-leveling filesystem for embedded systems"
 license = "MIT or Apache-2.0"
+repository = "https://github.com/card-io-ecg/norfs"
+categories = ["embedded", "no-std", "filesystem"]
+keywords = ["embedded", "no-std", "filesystem", "flash"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
