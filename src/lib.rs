@@ -607,7 +607,7 @@ where
             let mut objects = block.objects();
             while let Some(meta_object) = objects.next(&mut self.medium).await? {
                 match meta_object.state() {
-                    ObjectState::Free => break,
+                    ObjectState::Free | ObjectState::Corrupted => break,
                     ObjectState::Allocated => break,
                     ObjectState::Finalized => {}
                     ObjectState::Deleted => continue,
@@ -687,8 +687,8 @@ trait ObjectMover: Debug {
             while let Some(object) = iter.next(&mut storage.medium).await? {
                 match object.state() {
                     ObjectState::Free | ObjectState::Deleted => continue,
-                    ObjectState::Allocated => {
-                        log::warn!("Encountered an allocated object");
+                    ObjectState::Allocated | ObjectState::Corrupted => {
+                        log::warn!("Encountered object in incorrect state");
                         // TODO: retry in a different object
                         return Err(StorageError::InsufficientSpace);
                     }
