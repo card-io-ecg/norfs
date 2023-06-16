@@ -584,9 +584,18 @@ where
         log::trace!("Storage::find_new_object_location({ty:?}, {len})");
 
         // find block with most free space
-        let block = self
+        let block = match self
             .blocks
-            .find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)?;
+            .find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)
+        {
+            Ok(block) => block,
+            Err(StorageError::InsufficientSpace) => {
+                self.try_to_free_space(ty, len).await?;
+                self.blocks
+                    .find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)?
+            }
+            Err(e) => return Err(e),
+        };
 
         if self.blocks.blocks[block].header.kind() == BlockHeaderKind::Known(BlockType::Undefined) {
             BlockOps::new(&mut self.medium)
@@ -603,6 +612,11 @@ where
         log::trace!("Storage::find_new_object_location({ty:?}, {len}) -> {location:?}");
 
         Ok(location)
+    }
+
+    async fn try_to_free_space(&mut self, _ty: BlockType, _len: usize) -> Result<(), StorageError> {
+        // TODO
+        Err(StorageError::InsufficientSpace)
     }
 }
 
