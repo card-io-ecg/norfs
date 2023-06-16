@@ -43,6 +43,9 @@ pub enum StorageError {
 
     /// The storage medium is full.
     InsufficientSpace,
+
+    /// The end of file was reached.
+    EndOfFile,
 }
 
 /// A mounted storage partition.
@@ -128,6 +131,40 @@ where
         }
 
         Ok(len - buf.len())
+    }
+
+    pub async fn read_all(
+        &mut self,
+        storage: &mut Storage<M>,
+        buf: &mut [u8],
+    ) -> Result<(), StorageError> {
+        log::debug!("Reader::read_all(len = {})", buf.len());
+
+        if !buf.is_empty() {
+            let read = self.read(storage, buf).await?;
+            if read == 0 {
+                return Err(StorageError::EndOfFile);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn read_array<const N: usize>(
+        &mut self,
+        storage: &mut Storage<M>,
+    ) -> Result<[u8; N], StorageError> {
+        let mut buf = [0u8; N];
+
+        self.read_all(storage, &mut buf).await?;
+
+        Ok(buf)
+    }
+
+    pub async fn read_one(&mut self, storage: &mut Storage<M>) -> Result<u8, StorageError> {
+        let buf = self.read_array::<1>(storage).await?;
+
+        Ok(buf[0])
     }
 }
 
