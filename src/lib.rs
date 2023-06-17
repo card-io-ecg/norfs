@@ -66,7 +66,7 @@ where
 
         // Try to find a used block with enough free space
         if let Some(block) = self.blocks.iter().position(|info| {
-            info.header.kind() == BlockHeaderKind::Known(ty)
+            info.kind() == BlockHeaderKind::Known(ty)
                 && !info.is_empty()
                 && info.free_space() >= min_free
         }) {
@@ -79,10 +79,10 @@ where
             .iter()
             .enumerate()
             .filter(|(_, info)| {
-                info.header.kind() == BlockHeaderKind::Known(BlockType::Undefined)
+                info.kind() == BlockHeaderKind::Known(BlockType::Undefined)
                     && info.free_space() >= min_free
             })
-            .min_by_key(|(_, info)| info.header.erase_count())
+            .min_by_key(|(_, info)| info.erase_count())
         {
             return Ok(block);
         }
@@ -270,7 +270,7 @@ where
         let mut used_bytes = 0;
 
         for (block_idx, info) in self.blocks.blocks.iter().enumerate() {
-            match info.header.kind() {
+            match info.kind() {
                 BlockHeaderKind::Empty => {}
                 BlockHeaderKind::Known(BlockType::Undefined) | BlockHeaderKind::Unknown => {
                     used_bytes += info.used_bytes();
@@ -597,7 +597,7 @@ where
             Err(e) => return Err(e),
         };
 
-        if self.blocks.blocks[block].header.kind() == BlockHeaderKind::Known(BlockType::Undefined) {
+        if self.blocks.blocks[block].kind() == BlockHeaderKind::Known(BlockType::Undefined) {
             BlockOps::new(&mut self.medium)
                 .set_block_type(block, ty)
                 .await?;
@@ -617,30 +617,37 @@ where
     async fn try_to_free_space(&mut self, ty: BlockType, len: usize) -> Result<(), StorageError> {
         let mut ops = BlockOps::new(&mut self.medium);
 
-        let mut target_block = None::<usize>;
+        let mut target_block = None::<(usize, usize)>;
 
         // Select block with enough freeable space and minimum erase counter
         for (block_idx, info) in self
             .blocks
+            .blocks
             .iter()
             .enumerate()
-            .filter(|(_, block)| block.header.kind() == BlockHeaderKind::Known(ty))
+            .filter(|(_, block)| block.kind() == BlockHeaderKind::Known(ty))
         {
-            if ops.calculate_freeable_space(block_idx).await? > len {
+            let freeable = ops.calculate_freeable_space(block_idx).await?;
+
+            if freeable > len {
                 match target_block {
-                    Some(idx) => {
-                        if info.header.erase_count() < self.blocks[idx].header.erase_count() {
-                            target_block = Some(block_idx);
+                    Some((idx, _)) => {
+                        if info.erase_count() < self.blocks.blocks[idx].erase_count() {
+                            target_block = Some((block_idx, freeable));
                         }
                     }
 
-                    None => target_block = Some(block_idx),
+                    None => target_block = Some((block_idx, freeable)),
                 }
             }
         }
 
-        if let Some(target) = target_block {
-            // TODO
+        if let Some((target, freeable)) = target_block {
+            if freeable != self.blocks.blocks[target].used_bytes() {
+                // TODO move objects out of target block
+            }
+
+            ops.format_block(target).await?;
         }
 
         Err(StorageError::InsufficientSpace)

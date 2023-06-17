@@ -261,6 +261,14 @@ impl<M: StorageMedium> BlockInfo<M> {
     pub fn used_bytes(&self) -> usize {
         self.used_bytes
     }
+
+    pub fn kind(&self) -> BlockHeaderKind {
+        self.header.kind()
+    }
+
+    pub fn erase_count(&self) -> u32 {
+        self.header.erase_count
+    }
 }
 
 pub(crate) struct BlockOps<'a, M> {
