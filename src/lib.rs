@@ -593,15 +593,12 @@ where
         log::trace!("Storage::find_new_object_location({ty:?}, {len})");
 
         // find block with most free space
-        let block = match self
-            .blocks
-            .find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)
-        {
+        let object_size = M::align(ObjectHeader::byte_count::<M>()) + len;
+        let block = match self.blocks.find_alloc_block(ty, object_size) {
             Ok(block) => block,
             Err(StorageError::InsufficientSpace) => {
-                self.try_to_free_space(ty, len).await?;
-                self.blocks
-                    .find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)?
+                self.try_to_free_space(ty, object_size).await?;
+                self.blocks.find_alloc_block(ty, object_size)?
             }
             Err(e) => return Err(e),
         };
@@ -657,7 +654,7 @@ where
             }
 
             ops.format_block(target).await?;
-            self.blocks[target].update_stats_after_erase();
+            self.blocks.blocks[target].update_stats_after_erase();
         }
 
         Err(StorageError::InsufficientSpace)
