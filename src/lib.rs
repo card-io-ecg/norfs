@@ -648,6 +648,7 @@ where
             }
 
             ops.format_block(target).await?;
+            self.blocks[target].update_stats_after_erase();
         }
 
         Err(StorageError::InsufficientSpace)
