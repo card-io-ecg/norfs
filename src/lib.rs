@@ -614,8 +614,35 @@ where
         Ok(location)
     }
 
-    async fn try_to_free_space(&mut self, _ty: BlockType, _len: usize) -> Result<(), StorageError> {
-        // TODO
+    async fn try_to_free_space(&mut self, ty: BlockType, len: usize) -> Result<(), StorageError> {
+        let mut ops = BlockOps::new(&mut self.medium);
+
+        let mut target_block = None::<usize>;
+
+        // Select block with enough freeable space and minimum erase counter
+        for (block_idx, info) in self
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| block.header.kind() == BlockHeaderKind::Known(ty))
+        {
+            if ops.calculate_freeable_space(block_idx).await? > len {
+                match target_block {
+                    Some(idx) => {
+                        if info.header.erase_count() < self.blocks[idx].header.erase_count() {
+                            target_block = Some(block_idx);
+                        }
+                    }
+
+                    None => target_block = Some(block_idx),
+                }
+            }
+        }
+
+        if let Some(target) = target_block {
+            // TODO
+        }
+
         Err(StorageError::InsufficientSpace)
     }
 }

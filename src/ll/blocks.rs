@@ -297,6 +297,23 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
         Ok(true)
     }
 
+    pub async fn calculate_freeable_space(&mut self, block: usize) -> Result<usize, StorageError> {
+        let mut iter = ObjectIterator::new::<M>(block);
+
+        let mut deleted = 0;
+
+        while let Some(object) = iter.next(self.medium).await? {
+            match object.state() {
+                ObjectState::Allocated | ObjectState::Deleted => deleted += object.total_size(),
+                ObjectState::Free | ObjectState::Finalized => {}
+            }
+        }
+
+        let free_space = M::BLOCK_SIZE - iter.current_offset();
+
+        Ok(free_space + deleted)
+    }
+
     pub async fn read_header(&mut self, block: usize) -> Result<BlockHeader<M>, StorageError> {
         BlockHeader::read(self.medium, block).await
     }
