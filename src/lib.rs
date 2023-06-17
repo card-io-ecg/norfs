@@ -73,18 +73,27 @@ where
             return Ok(block);
         }
 
-        // Pick a free block. Prioritize lesser used blocks.
-        if let Some((block, _)) = self
+        // We reserve 2 blocks for GC.
+        if self
             .blocks
             .iter()
-            .enumerate()
-            .filter(|(_, info)| {
-                info.kind() == BlockHeaderKind::Known(BlockType::Undefined)
-                    && info.free_space() >= min_free
-            })
-            .min_by_key(|(_, info)| info.erase_count())
+            .filter(|info| info.kind() == BlockHeaderKind::Known(BlockType::Undefined))
+            .count()
+            > 2
         {
-            return Ok(block);
+            // Pick a free block. Prioritize lesser used blocks.
+            if let Some((block, _)) = self
+                .blocks
+                .iter()
+                .enumerate()
+                .filter(|(_, info)| {
+                    info.kind() == BlockHeaderKind::Known(BlockType::Undefined)
+                        && info.free_space() >= min_free
+                })
+                .min_by_key(|(_, info)| info.erase_count())
+            {
+                return Ok(block);
+            }
         }
 
         // No block found
