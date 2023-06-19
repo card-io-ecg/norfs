@@ -266,6 +266,14 @@ impl<M: StorageMedium> BlockInfo<M> {
         self.header.kind()
     }
 
+    pub fn is_type(&self, ty: BlockType) -> bool {
+        self.header.kind() == BlockHeaderKind::Known(ty)
+    }
+
+    pub fn is_unassigned(&self) -> bool {
+        self.is_type(BlockType::Undefined)
+    }
+
     pub fn erase_count(&self) -> u32 {
         self.header.erase_count
     }

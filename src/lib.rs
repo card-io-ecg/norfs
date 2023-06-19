@@ -65,11 +65,11 @@ where
         log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
 
         // Try to find a used block with enough free space
-        if let Some(block) = self.blocks.iter().position(|info| {
-            info.kind() == BlockHeaderKind::Known(ty)
-                && !info.is_empty()
-                && info.free_space() >= min_free
-        }) {
+        if let Some(block) = self
+            .blocks
+            .iter()
+            .position(|info| info.is_type(ty) && !info.is_empty() && info.free_space() >= min_free)
+        {
             return Ok(block);
         }
 
@@ -77,7 +77,7 @@ where
         if self
             .blocks
             .iter()
-            .filter(|info| info.kind() == BlockHeaderKind::Known(BlockType::Undefined))
+            .filter(|info| info.is_type(BlockType::Undefined))
             .count()
             > 2
         {
@@ -86,10 +86,7 @@ where
                 .blocks
                 .iter()
                 .enumerate()
-                .filter(|(_, info)| {
-                    info.kind() == BlockHeaderKind::Known(BlockType::Undefined)
-                        && info.free_space() >= min_free
-                })
+                .filter(|(_, info)| info.is_unassigned() && info.free_space() >= min_free)
                 .min_by_key(|(_, info)| info.erase_count())
             {
                 return Ok(block);
@@ -114,7 +111,7 @@ where
             .iter()
             .copied()
             .enumerate()
-            .filter(|(_, block)| block.kind() == BlockHeaderKind::Known(ty))
+            .filter(|(_, block)| block.is_type(ty))
         {
             let freeable = IndexedBlockInfo(block_idx, info)
                 .calculate_freeable_space(medium)
@@ -639,7 +636,7 @@ where
             Err(e) => return Err(e),
         };
 
-        if self.blocks.blocks[block].kind() == BlockHeaderKind::Known(BlockType::Undefined) {
+        if self.blocks.blocks[block].is_unassigned() {
             BlockOps::new(&mut self.medium)
                 .set_block_type(block, ty)
                 .await?;
