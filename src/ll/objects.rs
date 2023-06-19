@@ -793,6 +793,14 @@ impl<M: StorageMedium> ObjectInfo<M> {
         Ok(new)
     }
 
+    pub async fn finalize(mut self, medium: &mut M) -> Result<Self, StorageError> {
+        self.header
+            .update_state(medium, ObjectState::Finalized)
+            .await?;
+
+        Ok(self)
+    }
+
     pub async fn delete(mut self, medium: &mut M) -> Result<(), StorageError> {
         self.header.update_state(medium, ObjectState::Deleted).await
     }

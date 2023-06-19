@@ -684,6 +684,8 @@ where
     }
 }
 
+// Async functions can't be recursive. Splitting out implementation for each block type means
+// we can reuse code without recursion.
 trait NewObjectAllocator: Debug {
     const BLOCK_TYPE: BlockType;
 
@@ -802,14 +804,52 @@ impl NewObjectAllocator for DataObject {
             .find_new_object_location(storage, meta.total_size())
             .await?;
 
-        // TODO: copy metadata object while replacing current object location to
-        //       new location
+        // copy metadata object while replacing current object location to new location
+        let mut meta_writer = ObjectWriter::allocate(
+            new_meta_location,
+            ObjectType::FileMetadata,
+            &mut storage.medium,
+        )
+        .await?;
+        let mut old_object_reader = meta.read_metadata(&mut storage.medium).await?;
 
-        // TODO: copy object
+        // copy header
+        meta_writer
+            .write(
+                &mut storage.medium,
+                &old_object_reader.path_hash.to_le_bytes(),
+            )
+            .await?;
+        let (bytes, byte_count) = old_object_reader.filename_location.into_bytes::<M>();
+        meta_writer
+            .write(&mut storage.medium, &bytes[..byte_count])
+            .await?;
+
+        // copy object locations
+        while let Some(loc) = old_object_reader
+            .next_object_location(&mut storage.medium)
+            .await?
+        {
+            let location = if loc == object.location() {
+                destination
+            } else {
+                loc
+            };
+
+            let (bytes, byte_count) = location.into_bytes::<M>();
+            meta_writer
+                .write(&mut storage.medium, &bytes[..byte_count])
+                .await?;
+        }
+
+        // copy data object
         let copied = object.copy_object(&mut storage.medium, destination).await?;
-        // TODO: finalize metadata object
-        // TODO: delete old metadata object
-        // TODO: delete old object
+
+        // finalize metadata object
+        meta_writer.finalize(&mut storage.medium).await?;
+        // delete old metadata object
+        meta.delete(&mut storage.medium).await?;
+        // delete old object
         object.delete(&mut storage.medium).await?;
 
         Ok(copied)
