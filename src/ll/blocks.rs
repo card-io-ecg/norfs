@@ -280,11 +280,16 @@ impl<M: StorageMedium> BlockInfo<M> {
 }
 
 pub struct IndexedBlockInfo<M: StorageMedium>(pub usize, pub BlockInfo<M>);
+
+impl<M: StorageMedium> Copy for IndexedBlockInfo<M> {}
+impl<M: StorageMedium> Clone for IndexedBlockInfo<M> {
+    fn clone(&self) -> Self {
+        Self(self.0, self.1)
+    }
+}
+
 impl<M: StorageMedium> IndexedBlockInfo<M> {
-    pub async fn calculate_freeable_space(
-        &mut self,
-        medium: &mut M,
-    ) -> Result<usize, StorageError> {
+    pub async fn calculate_freeable_space(&self, medium: &mut M) -> Result<usize, StorageError> {
         let Self(block, _info) = self;
 
         let mut iter = ObjectIterator::new::<M>(*block);
@@ -301,6 +306,18 @@ impl<M: StorageMedium> IndexedBlockInfo<M> {
         let free_space = M::BLOCK_SIZE - iter.current_offset();
 
         Ok(free_space + deleted)
+    }
+
+    pub fn erase_count(&self) -> u32 {
+        self.1.erase_count()
+    }
+
+    pub fn used_bytes(&self) -> usize {
+        self.1.used_bytes()
+    }
+
+    pub fn objects(&self) -> ObjectIterator {
+        ObjectIterator::new::<M>(self.0)
     }
 }
 

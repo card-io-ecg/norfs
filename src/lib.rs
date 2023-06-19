@@ -125,30 +125,29 @@ where
         ty: BlockType,
         len: usize,
         medium: &mut M,
-    ) -> Result<Option<(usize, usize)>, StorageError> {
-        let mut target_block = None::<(usize, usize)>;
+    ) -> Result<Option<(IndexedBlockInfo<M>, usize)>, StorageError> {
+        let mut target_block = None::<(IndexedBlockInfo<M>, usize)>;
 
         // Select block with enough freeable space and minimum erase counter
-        for (block_idx, info) in self
+        for info in self
             .blocks
             .iter()
             .copied()
             .enumerate()
-            .filter(|(_, block)| block.is_type(ty))
+            .filter(|(_, info)| info.is_type(ty))
+            .map(|(idx, info)| IndexedBlockInfo(idx, info))
         {
-            let freeable = IndexedBlockInfo(block_idx, info)
-                .calculate_freeable_space(medium)
-                .await?;
+            let freeable = info.calculate_freeable_space(medium).await?;
 
             if freeable > len {
                 match target_block {
                     Some((idx, _)) => {
-                        if info.erase_count() < self.blocks[idx].erase_count() {
-                            target_block = Some((block_idx, freeable));
+                        if info.erase_count() < idx.erase_count() {
+                            target_block = Some((info, freeable));
                         }
                     }
 
-                    None => target_block = Some((block_idx, freeable)),
+                    None => target_block = Some((info, freeable)),
                 }
             }
         }
@@ -161,6 +160,14 @@ where
         self.blocks[block_to_free].update_stats_after_erase();
 
         Ok(())
+    }
+
+    async fn format_indexed(
+        &mut self,
+        block_to_free: IndexedBlockInfo<M>,
+        medium: &mut M,
+    ) -> Result<(), StorageError> {
+        self.format(block_to_free.0, medium).await
     }
 }
 
@@ -717,9 +724,9 @@ where
             return Err(StorageError::InsufficientSpace);
         };
 
-        if freeable != self.blocks.blocks[block_to_free].used_bytes() {
+        if freeable != block_to_free.used_bytes() {
             // We need to move objects out of this block
-            let mut iter = ObjectIterator::new::<M>(block_to_free);
+            let mut iter = block_to_free.objects();
 
             while let Some(object) = iter.next(&mut self.medium).await? {
                 match object.state() {
@@ -742,7 +749,9 @@ where
             }
         }
 
-        self.blocks.format(block_to_free, &mut self.medium).await
+        self.blocks
+            .format_indexed(block_to_free, &mut self.medium)
+            .await
     }
 }
 
