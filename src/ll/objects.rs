@@ -278,7 +278,7 @@ impl ObjectLocation {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ObjectHeader {
     state: CompositeObjectState,
     payload_size: usize, // At most block size - header
@@ -319,7 +319,7 @@ impl ObjectHeader {
         location: ObjectLocation,
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
-        log::trace!("ObjectHeader::allocate({location:?}, {object_type:?})",);
+        log::debug!("ObjectHeader::allocate({location:?}, {object_type:?})",);
 
         let state = CompositeObjectState::allocate(medium, location, object_type).await?;
 
@@ -433,7 +433,13 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
         log::trace!("MetadataObjectHeader::next_object_location()");
 
         let data_offset = 4 + M::object_location_bytes(); // path hash + filename location
-        if self.data_object_cursor >= self.object.payload_size - data_offset {
+        if self.data_object_cursor
+            >= self
+                .object
+                .payload_size::<M>()
+                .map(|size| size - data_offset)
+                .unwrap_or(0)
+        {
             return Ok(None);
         }
 
@@ -553,6 +559,11 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         if self.space() < data.len() {
+            log::debug!(
+                "Insufficient space ({}) to write data ({})",
+                self.space(),
+                data.len()
+            );
             return Err(StorageError::InsufficientSpace);
         }
 
@@ -761,6 +772,7 @@ impl<M: StorageMedium> ObjectInfo<M> {
         if header.state().is_free() {
             return Ok(None);
         }
+        log::trace!("ObjectInfo::read({location:?}) -> {header:?}");
 
         Ok(Some(Self::with_header(header)))
     }
