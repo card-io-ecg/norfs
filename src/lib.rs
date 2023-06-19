@@ -365,7 +365,7 @@ where
                         read += bytes_read;
                     }
 
-                    return Ok(metadata.location);
+                    return Ok(metadata.location());
                 }
             }
         }

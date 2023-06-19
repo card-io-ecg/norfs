@@ -36,7 +36,7 @@ impl<'a, M: StorageMedium> Gc<'a, M> {
                 let mut delete = true;
 
                 let payload_size_based_on_block_data =
-                    info.used_bytes() - object.location.offset - ObjectHeader::byte_count::<M>();
+                    info.used_bytes() - object.location().offset - ObjectHeader::byte_count::<M>();
 
                 if let Some(payload_size) = object.header.payload_size::<M>() {
                     // We can clean up objects that seem to have a valid size. However, we can't

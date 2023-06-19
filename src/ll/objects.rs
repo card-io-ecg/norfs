@@ -420,7 +420,6 @@ pub struct MetadataObjectHeader<M: StorageMedium> {
     pub object: ObjectHeader,
     pub path_hash: u32,
     pub filename_location: ObjectLocation,
-    pub location: ObjectLocation,
     data_object_cursor: usize, // Used to iterate through the list of object locations.
     _parent: Option<ObjectLocation>,
     _medium: PhantomData<M>,
@@ -443,8 +442,8 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
 
         medium
             .read(
-                self.location.block,
-                self.location.offset
+                self.location().block,
+                self.location().offset
                     + M::align(ObjectHeader::byte_count::<M>())
                     + data_offset
                     + self.data_object_cursor,
@@ -455,6 +454,10 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
         self.data_object_cursor += location_bytes.len();
 
         Ok(Some(ObjectLocation::from_bytes::<M>(location_bytes)))
+    }
+
+    pub fn location(&self) -> ObjectLocation {
+        self.object.location
     }
 
     pub async fn reset(&mut self) {
@@ -689,7 +692,6 @@ impl<M: StorageMedium> ObjectReader<M> {
 }
 
 pub struct ObjectInfo<M: StorageMedium> {
-    pub location: ObjectLocation,
     pub header: ObjectHeader,
     _medium: PhantomData<M>,
 }
@@ -697,7 +699,6 @@ pub struct ObjectInfo<M: StorageMedium> {
 impl<M: StorageMedium> ObjectInfo<M> {
     fn with_header(header: ObjectHeader) -> Self {
         Self {
-            location: header.location,
             header,
             _medium: PhantomData,
         }
@@ -711,14 +712,22 @@ impl<M: StorageMedium> ObjectInfo<M> {
         ObjectHeader::byte_count::<M>() + self.header.payload_size::<M>().unwrap_or(0)
     }
 
+    pub fn location(&self) -> ObjectLocation {
+        self.header.location
+    }
+
     pub async fn read_metadata(
         &self,
         medium: &mut M,
     ) -> Result<MetadataObjectHeader<M>, StorageError> {
         let mut path_hash_bytes = [0; 4];
-        let path_hash_offset = self.location.offset + M::align(ObjectHeader::byte_count::<M>());
+        let path_hash_offset = self.location().offset + M::align(ObjectHeader::byte_count::<M>());
         medium
-            .read(self.location.block, path_hash_offset, &mut path_hash_bytes)
+            .read(
+                self.location().block,
+                path_hash_offset,
+                &mut path_hash_bytes,
+            )
             .await?;
 
         let mut filename_location_bytes = [0; 8];
@@ -726,7 +735,7 @@ impl<M: StorageMedium> ObjectInfo<M> {
 
         medium
             .read(
-                self.location.block,
+                self.location().block,
                 path_hash_offset + 4,
                 filename_location_bytes,
             )
@@ -736,7 +745,6 @@ impl<M: StorageMedium> ObjectInfo<M> {
             object: self.header,
             path_hash: u32::from_le_bytes(path_hash_bytes),
             filename_location: ObjectLocation::from_bytes::<M>(filename_location_bytes),
-            location: self.location,
             data_object_cursor: 0,
             _parent: None,
             _medium: PhantomData,
@@ -749,18 +757,12 @@ impl<M: StorageMedium> ObjectInfo<M> {
             return Ok(None);
         }
 
-        let object = ObjectHeader::read(location, medium).await?;
-        if object.state().is_free() {
+        let header = ObjectHeader::read(location, medium).await?;
+        if header.state().is_free() {
             return Ok(None);
         }
 
-        let info = ObjectInfo {
-            location,
-            header: object,
-            _medium: PhantomData,
-        };
-
-        Ok(Some(info))
+        Ok(Some(Self::with_header(header)))
     }
 }
 
