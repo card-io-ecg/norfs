@@ -762,7 +762,10 @@ impl<M: StorageMedium> ObjectInfo<M> {
         })
     }
 
-    async fn read(location: ObjectLocation, medium: &mut M) -> Result<Option<Self>, StorageError> {
+    pub async fn read(
+        location: ObjectLocation,
+        medium: &mut M,
+    ) -> Result<Option<Self>, StorageError> {
         log::trace!("ObjectInfo::read({location:?})");
         let header = ObjectHeader::read(location, medium).await?;
         log::trace!("ObjectInfo::read({location:?}) -> {header:?}");

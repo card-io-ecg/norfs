@@ -514,10 +514,11 @@ where
     async fn delete_file_at(&mut self, meta_location: ObjectLocation) -> Result<(), StorageError> {
         let mut metadata = meta_location.read_metadata(&mut self.medium).await?;
 
-        metadata
-            .object
-            .update_state(&mut self.medium, ObjectState::Deleted)
-            .await?;
+        if let Some(filename_object) =
+            ObjectInfo::read(metadata.filename_location, &mut self.medium).await?
+        {
+            filename_object.delete(&mut self.medium).await?;
+        }
 
         while let Some(location) = metadata.next_object_location(&mut self.medium).await? {
             let mut header = ObjectHeader::read(location, &mut self.medium).await?;
