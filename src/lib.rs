@@ -64,6 +64,17 @@ where
     fn find_alloc_block(&self, ty: BlockType, min_free: usize) -> Result<usize, StorageError> {
         log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
 
+        self.find_alloc_block_impl(ty, min_free, false)
+    }
+
+    fn find_alloc_block_impl(
+        &self,
+        ty: BlockType,
+        min_free: usize,
+        allow_gc_block: bool,
+    ) -> Result<usize, StorageError> {
+        log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
+
         // Try to find a used block with enough free space
         if let Some(block) = self
             .blocks
@@ -80,6 +91,7 @@ where
             .filter(|info| info.is_type(BlockType::Undefined))
             .count()
             > 2
+            || allow_gc_block
         {
             // Pick a free block. Prioritize lesser used blocks.
             if let Some((block, _)) = self
@@ -660,10 +672,20 @@ where
             .await?
         {
             if freeable != self.blocks.blocks[target].used_bytes() {
-                // TODO move objects out of target block
+                // We need to move objects out of this block
+
+                // TODO: for each object
+                let copy_target = self
+                    .blocks
+                    .find_alloc_block_impl(ty, freeable, true)
+                    .map_err(|_| StorageError::InsufficientSpace)?;
+
                 if ty == BlockType::Data {
                     // TODO when moving a data object, update the file metadata
                 }
+
+                // Can not move object(s)
+                return Err(StorageError::InsufficientSpace);
             }
 
             BlockOps::new(&mut self.medium).format_block(target).await?;
