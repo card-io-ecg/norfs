@@ -619,6 +619,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
 
     pub async fn finalize(mut self, medium: &mut M) -> Result<ObjectInfo<M>, StorageError> {
         if self.object.state() != ObjectState::Allocated {
+            log::error!("Can not finalize object in state {:?}", self.object.state());
             return Err(StorageError::InvalidOperation);
         }
 
@@ -631,6 +632,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
 
     pub async fn delete(mut self, medium: &mut M) -> Result<(), StorageError> {
         if let ObjectState::Free | ObjectState::Deleted = self.object.state() {
+            log::error!("Can not delete object in state {:?}", self.object.state());
             return Ok(());
         }
 

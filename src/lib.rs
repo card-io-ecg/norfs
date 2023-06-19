@@ -412,6 +412,7 @@ where
             self.create_new_file(path, data).await?;
 
             if let Some(location) = overwritten {
+                // TODO: it's possible that location has been moved if we had to free up space.
                 self.delete_file_at(location).await?;
             }
 
@@ -557,6 +558,7 @@ where
 
     async fn create_new_file(&mut self, path: &str, mut data: &[u8]) -> Result<(), StorageError> {
         if path.contains(&['/', '\\'][..]) {
+            log::warn!("Path contains invalid characters");
             return Err(StorageError::InvalidOperation);
         }
 
@@ -1216,9 +1218,15 @@ mod test {
             storage
                 .store("foo", LIPSUM, OnCollision::Overwrite)
                 .await
-                .expect("Create failed");
+                .unwrap_or_else(|e| {
+                    storage.medium.debug_print();
+                    panic!("Create failed: {e:?}");
+                });
 
-            storage.delete("foo").await.expect("Failed to delete");
+            storage.delete("foo").await.unwrap_or_else(|e| {
+                storage.medium.debug_print();
+                panic!("Failed to delete: {e:?}");
+            });
         }
     }
 }
