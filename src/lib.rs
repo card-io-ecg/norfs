@@ -48,6 +48,50 @@ pub enum StorageError {
     EndOfFile,
 }
 
+struct BlockInfoCollection<M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    blocks: [BlockInfo<M>; M::BLOCK_COUNT],
+}
+
+impl<M> BlockInfoCollection<M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    fn find_alloc_block(&self, ty: BlockType, min_free: usize) -> Result<usize, StorageError> {
+        log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
+
+        // Try to find a used block with enough free space
+        if let Some(block) = self.blocks.iter().position(|info| {
+            info.header.kind() == BlockHeaderKind::Known(ty)
+                && !info.is_empty()
+                && info.free_space() >= min_free
+        }) {
+            return Ok(block);
+        }
+
+        // Pick a free block. Prioritize lesser used blocks.
+        if let Some((block, _)) = self
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, info)| {
+                info.header.kind() == BlockHeaderKind::Known(BlockType::Undefined)
+                    && info.free_space() >= min_free
+            })
+            .min_by_key(|(_, info)| info.header.erase_count())
+        {
+            return Ok(block);
+        }
+
+        // No block found
+        Err(StorageError::InsufficientSpace)
+    }
+}
+
 /// A mounted storage partition.
 pub struct Storage<M>
 where
@@ -55,7 +99,7 @@ where
     [(); M::BLOCK_COUNT]:,
 {
     medium: M,
-    blocks: [BlockInfo<M>; M::BLOCK_COUNT],
+    blocks: BlockInfoCollection<M>,
 }
 
 /// Controls what happens when storing data to a file that already exists.
@@ -186,7 +230,7 @@ where
 
         Ok(Self {
             medium: partition,
-            blocks,
+            blocks: BlockInfoCollection { blocks },
         })
     }
 
@@ -213,6 +257,7 @@ where
     /// not match the value `capacity() - used_bytes()`.
     pub fn free_bytes(&self) -> usize {
         self.blocks
+            .blocks
             .iter()
             .map(|blk| M::BLOCK_SIZE - blk.used_bytes())
             .sum()
@@ -224,7 +269,7 @@ where
     pub async fn used_bytes(&mut self) -> Result<usize, StorageError> {
         let mut used_bytes = 0;
 
-        for (block_idx, info) in self.blocks.iter().enumerate() {
+        for (block_idx, info) in self.blocks.blocks.iter().enumerate() {
             match info.header.kind() {
                 BlockHeaderKind::Empty => {}
                 BlockHeaderKind::Known(BlockType::Undefined) | BlockHeaderKind::Unknown => {
@@ -326,6 +371,7 @@ where
 
         for block_idx in self
             .blocks
+            .blocks
             .iter()
             .enumerate()
             .filter_map(|(idx, blk)| blk.is_metadata().then_some(idx))
@@ -402,7 +448,7 @@ where
         location: ObjectLocation,
         data: &[u8],
     ) -> Result<(), StorageError> {
-        self.blocks[location.block].add_used_bytes(
+        self.blocks.blocks[location.block].add_used_bytes(
             ObjectWriter::write_to(location, ObjectType::FileData, &mut self.medium, data).await?,
         );
         Ok(())
@@ -463,8 +509,8 @@ where
         while !data.is_empty() {
             // Write file name as data object
             let chunk_location = self.find_new_object_location(BlockType::Data, 0).await?;
-            let max_chunk_len =
-                self.blocks[chunk_location.block].free_space() - ObjectHeader::byte_count::<M>();
+            let max_chunk_len = self.blocks.blocks[chunk_location.block].free_space()
+                - ObjectHeader::byte_count::<M>();
 
             log::debug!("Max chunk len: {max_chunk_len}");
 
@@ -478,7 +524,8 @@ where
                 Err(StorageError::InsufficientSpace) => {
                     log::debug!("Reallocating metadata object");
                     // Old object's accounting
-                    self.blocks[file_meta_location.block].add_used_bytes(meta_writer.total_size());
+                    self.blocks.blocks[file_meta_location.block]
+                        .add_used_bytes(meta_writer.total_size());
 
                     let new_file_meta_location = self
                         .find_new_object_location(
@@ -524,39 +571,9 @@ where
         // TODO: store data length
         // Finalize header object
         let object_total_size = meta_writer.finalize(&mut self.medium).await?.total_size();
-        self.blocks[file_meta_location.block].add_used_bytes(object_total_size);
+        self.blocks.blocks[file_meta_location.block].add_used_bytes(object_total_size);
 
         Ok(())
-    }
-
-    fn find_alloc_block(&self, ty: BlockType, min_free: usize) -> Result<usize, StorageError> {
-        log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
-
-        // Try to find a used block with enough free space
-        if let Some(block) = self.blocks.iter().position(|info| {
-            info.header.kind() == BlockHeaderKind::Known(ty)
-                && !info.is_empty()
-                && info.free_space() >= min_free
-        }) {
-            return Ok(block);
-        }
-
-        // Pick a free block. Prioritize lesser used blocks.
-        if let Some((block, _)) = self
-            .blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, info)| {
-                info.header.kind() == BlockHeaderKind::Known(BlockType::Undefined)
-                    && info.free_space() >= min_free
-            })
-            .min_by_key(|(_, info)| info.header.erase_count())
-        {
-            return Ok(block);
-        }
-
-        // No block found
-        Err(StorageError::InsufficientSpace)
     }
 
     async fn find_new_object_location(
@@ -567,18 +584,20 @@ where
         log::trace!("Storage::find_new_object_location({ty:?}, {len})");
 
         // find block with most free space
-        let block = self.find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)?;
+        let block = self
+            .blocks
+            .find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)?;
 
-        if self.blocks[block].header.kind() == BlockHeaderKind::Known(BlockType::Undefined) {
+        if self.blocks.blocks[block].header.kind() == BlockHeaderKind::Known(BlockType::Undefined) {
             BlockOps::new(&mut self.medium)
                 .set_block_type(block, ty)
                 .await?;
-            self.blocks[block].header.set_block_type(ty);
+            self.blocks.blocks[block].header.set_block_type(ty);
         }
 
         let location = ObjectLocation {
             block,
-            offset: self.blocks[block].used_bytes(),
+            offset: self.blocks.blocks[block].used_bytes(),
         };
 
         log::trace!("Storage::find_new_object_location({ty:?}, {len}) -> {location:?}");
