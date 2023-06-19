@@ -144,6 +144,13 @@ where
 
         Ok(target_block)
     }
+
+    async fn format(&mut self, block_to_free: usize, medium: &mut M) -> Result<(), StorageError> {
+        BlockOps::new(medium).format_block(block_to_free).await?;
+        self.blocks[block_to_free].update_stats_after_erase();
+
+        Ok(())
+    }
 }
 
 /// A mounted storage partition.
@@ -733,12 +740,7 @@ where
             }
         }
 
-        BlockOps::new(&mut self.medium)
-            .format_block(block_to_free)
-            .await?;
-        self.blocks.blocks[block_to_free].update_stats_after_erase();
-
-        Ok(())
+        self.blocks.format(block_to_free, &mut self.medium).await
     }
 }
 
