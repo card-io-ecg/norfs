@@ -798,9 +798,9 @@ impl NewObjectAllocator for DataObject {
         [(); M::BLOCK_COUNT]:,
     {
         let meta = storage.find_metadata_of_object(&object).await?;
-        // let new_meta_location = self
-        //     .find_new_metadata_object_location(meta.total_size())
-        //     .await?;
+        let new_meta_location = MetaObject
+            .find_new_object_location(storage, meta.total_size())
+            .await?;
 
         // TODO: copy metadata object while replacing current object location to
         //       new location
