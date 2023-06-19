@@ -1,4 +1,7 @@
-use core::marker::PhantomData;
+use core::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{
     ll::objects::{ObjectIterator, ObjectState},
@@ -308,16 +311,22 @@ impl<M: StorageMedium> IndexedBlockInfo<M> {
         Ok(free_space + deleted)
     }
 
-    pub fn erase_count(&self) -> u32 {
-        self.1.erase_count()
-    }
-
-    pub fn used_bytes(&self) -> usize {
-        self.1.used_bytes()
-    }
-
     pub fn objects(&self) -> ObjectIterator {
         ObjectIterator::new::<M>(self.0)
+    }
+}
+
+impl<M: StorageMedium> Deref for IndexedBlockInfo<M> {
+    type Target = BlockInfo<M>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.1
+    }
+}
+
+impl<M: StorageMedium> DerefMut for IndexedBlockInfo<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.1
     }
 }
 

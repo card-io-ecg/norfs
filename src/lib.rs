@@ -70,6 +70,15 @@ where
         self.allocate_object(ty, min_free, false, medium).await
     }
 
+    fn blocks(&self, ty: BlockType) -> impl Iterator<Item = IndexedBlockInfo<M>> + '_ {
+        self.blocks
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(move |(_, info)| info.is_type(ty))
+            .map(|(idx, info)| IndexedBlockInfo(idx, info))
+    }
+
     fn allocate_object_impl(
         &self,
         ty: BlockType,
@@ -80,31 +89,21 @@ where
 
         // Try to find a used block with enough free space
         if let Some(block) = self
-            .blocks
-            .iter()
-            .position(|info| info.is_type(ty) && !info.is_empty() && info.free_space() >= min_free)
+            .blocks(ty)
+            .find(|info| !info.is_empty() && info.free_space() >= min_free)
         {
-            return Ok(block);
+            return Ok(block.0);
         }
 
         // We reserve 2 blocks for GC.
-        if self
-            .blocks
-            .iter()
-            .filter(|info| info.is_type(BlockType::Undefined))
-            .count()
-            > 2
-            || allow_gc_block
-        {
+        if allow_gc_block || self.blocks(BlockType::Undefined).count() > 2 {
             // Pick a free block. Prioritize lesser used blocks.
-            if let Some((block, _)) = self
-                .blocks
-                .iter()
-                .enumerate()
-                .filter(|(_, info)| info.is_unassigned() && info.free_space() >= min_free)
-                .min_by_key(|(_, info)| info.erase_count())
+            if let Some(block) = self
+                .blocks(BlockType::Undefined)
+                .filter(|info| info.free_space() >= min_free)
+                .min_by_key(|info| info.erase_count())
             {
-                return Ok(block);
+                return Ok(block.0);
             }
         }
 
@@ -145,26 +144,21 @@ where
         let mut target_block = None::<(IndexedBlockInfo<M>, usize)>;
 
         // Select block with enough freeable space and minimum erase counter
-        for info in self
-            .blocks
-            .iter()
-            .copied()
-            .enumerate()
-            .filter(|(_, info)| info.is_type(ty))
-            .map(|(idx, info)| IndexedBlockInfo(idx, info))
-        {
+        for info in self.blocks(ty) {
             let freeable = info.calculate_freeable_space(medium).await?;
 
-            if freeable > len {
-                match target_block {
-                    Some((idx, _)) => {
-                        if info.erase_count() < idx.erase_count() {
-                            target_block = Some((info, freeable));
-                        }
-                    }
+            if freeable <= len {
+                continue;
+            }
 
-                    None => target_block = Some((info, freeable)),
+            match target_block {
+                Some((idx, _)) => {
+                    if info.erase_count() < idx.erase_count() {
+                        target_block = Some((info, freeable));
+                    }
                 }
+
+                None => target_block = Some((info, freeable)),
             }
         }
 
@@ -727,7 +721,19 @@ where
         &mut self,
         object: &ObjectInfo<M>,
     ) -> Result<ObjectInfo<M>, StorageError> {
-        todo!()
+        for block in self.blocks.blocks(BlockType::Metadata) {
+            let mut objects = block.objects();
+            while let Some(meta_object) = objects.next(&mut self.medium).await? {
+                let mut meta = meta_object.read_metadata(&mut self.medium).await?;
+                while let Some(loc) = meta.next_object_location(&mut self.medium).await? {
+                    if loc == object.location() {
+                        return Ok(meta_object);
+                    }
+                }
+            }
+        }
+
+        Err(StorageError::NotFound)
     }
 
     async fn try_to_free_space(&mut self, ty: BlockType, len: usize) -> Result<(), StorageError> {
