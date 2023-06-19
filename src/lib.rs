@@ -9,8 +9,8 @@ use crate::{
     ll::{
         blocks::{BlockHeaderKind, BlockInfo, BlockOps, BlockType, IndexedBlockInfo},
         objects::{
-            MetadataObjectHeader, ObjectHeader, ObjectIterator, ObjectLocation, ObjectReader,
-            ObjectState, ObjectType, ObjectWriter,
+            MetadataObjectHeader, ObjectHeader, ObjectInfo, ObjectIterator, ObjectLocation,
+            ObjectReader, ObjectState, ObjectType, ObjectWriter,
         },
     },
     medium::{StorageMedium, StoragePrivate},
@@ -665,6 +665,36 @@ where
         Ok(location)
     }
 
+    async fn move_data_object(
+        &mut self,
+        object: ObjectInfo<M>,
+        destination: ObjectLocation,
+    ) -> Result<ObjectInfo<M>, StorageError> {
+        let meta = self.find_metadata_of_object(&object).await?;
+        // let new_meta_location = self
+        //     .find_new_metadata_object_location(meta.total_size())
+        //     .await?;
+
+        // TODO: copy metadata object while replacing current object location to
+        //       new location
+
+        // TODO: copy object
+        let copied = object.copy_object(&mut self.medium, destination).await?;
+        // TODO: finalize metadata object
+        // TODO: delete old metadata object
+        // TODO: delete old object
+        object.delete(&mut self.medium).await?;
+
+        Ok(copied)
+    }
+
+    async fn find_metadata_of_object(
+        &mut self,
+        object: &ObjectInfo<M>,
+    ) -> Result<ObjectInfo<M>, StorageError> {
+        todo!()
+    }
+
     async fn try_to_free_space(&mut self, ty: BlockType, len: usize) -> Result<(), StorageError> {
         let Some((block_to_free, freeable)) = self
             .blocks
@@ -695,15 +725,8 @@ where
                 };
 
                 if ty == BlockType::Data {
-                    // TODO when moving a data object, update the file metadata
-                    // TODO: find metadata object
-                    // TODO: copy metadata object while replacing current object location to
-                    //       new location
-                    // TODO: copy object
-                    // TODO: finalize metadata object
-                    // TODO: delete old metadata object
-                    // TODO: delete old object
-                    return Err(StorageError::InsufficientSpace);
+                    // When moving a data object, we need to update the file metadata, too.
+                    self.move_data_object(object, copy_location).await?;
                 } else {
                     object.move_object(&mut self.medium, copy_location).await?;
                 }

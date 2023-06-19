@@ -765,11 +765,11 @@ impl<M: StorageMedium> ObjectInfo<M> {
         Ok(Some(Self::with_header(header)))
     }
 
-    pub async fn move_object(
-        mut self,
+    pub async fn copy_object(
+        &self,
         medium: &mut M,
         dst: ObjectLocation,
-    ) -> Result<(), StorageError> {
+    ) -> Result<ObjectInfo<M>, StorageError> {
         let mut source = ObjectReader::new(self.location(), medium, false).await?;
         let mut target = ObjectWriter::allocate(dst, self.header.object_type()?, medium).await?;
 
@@ -779,7 +779,21 @@ impl<M: StorageMedium> ObjectInfo<M> {
             target.write(medium, &buffer[0..read_size]).await?;
         }
 
-        target.finalize(medium).await?;
+        target.finalize(medium).await
+    }
+
+    pub async fn move_object(
+        self,
+        medium: &mut M,
+        dst: ObjectLocation,
+    ) -> Result<ObjectInfo<M>, StorageError> {
+        let new = self.copy_object(medium, dst).await?;
+        self.delete(medium).await?;
+
+        Ok(new)
+    }
+
+    pub async fn delete(mut self, medium: &mut M) -> Result<(), StorageError> {
         self.header.update_state(medium, ObjectState::Deleted).await
     }
 }
