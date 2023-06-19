@@ -241,6 +241,7 @@ impl<M: StorageMedium> BlockInfo<M> {
 
     pub fn update_stats_after_erase(&mut self) {
         self.header.erase_count += 1;
+        self.header.header = BlockHeaderKind::Known(BlockType::Undefined);
         self.used_bytes = BlockHeader::<M>::byte_count();
         self.allow_alloc = true;
     }

@@ -1214,17 +1214,13 @@ mod test {
 
         let mut storage = create_default_fs().await;
 
-        storage
-            .store("foo", LIPSUM, OnCollision::Overwrite)
-            .await
-            .expect("Create failed");
+        for _ in 0..50 {
+            storage
+                .store("foo", LIPSUM, OnCollision::Overwrite)
+                .await
+                .expect("Create failed");
 
-        storage.delete("foo").await.expect("Failed to delete");
-
-        storage.medium.debug_print();
-        storage
-            .store("bar", LIPSUM, OnCollision::Overwrite)
-            .await
-            .expect("Failed to store");
+            storage.delete("foo").await.expect("Failed to delete");
+        }
     }
 }
