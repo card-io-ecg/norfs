@@ -531,7 +531,8 @@ impl<M: StorageMedium> ObjectWriter<M> {
         let mut this = Self::allocate(location, object_type, medium).await?;
 
         this.write(medium, data).await?;
-        this.finalize(medium).await
+        let info = this.finalize(medium).await?;
+        Ok(info.total_size())
     }
 
     fn data_write_offset(&self) -> usize {
@@ -597,7 +598,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         ObjectHeader::byte_count::<M>() + self.payload_size()
     }
 
-    pub async fn finalize(mut self, medium: &mut M) -> Result<usize, StorageError> {
+    pub async fn finalize(mut self, medium: &mut M) -> Result<ObjectInfo<M>, StorageError> {
         if self.object.state() != ObjectState::Allocated {
             return Err(StorageError::InvalidOperation);
         }
@@ -606,7 +607,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         self.write_size(medium).await?;
         self.set_state(medium, ObjectState::Finalized).await?;
 
-        Ok(self.total_size())
+        Ok(ObjectInfo::with_header(self.object))
     }
 
     pub async fn delete(mut self, medium: &mut M) -> Result<(), StorageError> {
@@ -694,6 +695,14 @@ pub struct ObjectInfo<M: StorageMedium> {
 }
 
 impl<M: StorageMedium> ObjectInfo<M> {
+    fn with_header(header: ObjectHeader) -> Self {
+        Self {
+            location: header.location,
+            header,
+            _medium: PhantomData,
+        }
+    }
+
     pub fn state(&self) -> ObjectState {
         self.header.state()
     }

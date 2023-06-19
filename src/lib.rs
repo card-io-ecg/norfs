@@ -523,7 +523,7 @@ where
 
         // TODO: store data length
         // Finalize header object
-        let object_total_size = meta_writer.finalize(&mut self.medium).await?;
+        let object_total_size = meta_writer.finalize(&mut self.medium).await?.total_size();
         self.blocks[file_meta_location.block].add_used_bytes(object_total_size);
 
         Ok(())
