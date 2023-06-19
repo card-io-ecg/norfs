@@ -668,12 +668,24 @@ where
         &mut self,
         object: &ObjectInfo<M>,
     ) -> Result<ObjectInfo<M>, StorageError> {
+        log::trace!("Storage::find_metadata_of_object({:?})", object.location());
         for block in self.blocks.blocks(BlockType::Metadata) {
             let mut objects = block.objects();
             while let Some(meta_object) = objects.next(&mut self.medium).await? {
+                match meta_object.state() {
+                    ObjectState::Free => break,
+                    ObjectState::Allocated => break,
+                    ObjectState::Finalized => {}
+                    ObjectState::Deleted => continue,
+                }
                 let mut meta = meta_object.read_metadata(&mut self.medium).await?;
                 while let Some(loc) = meta.next_object_location(&mut self.medium).await? {
                     if loc == object.location() {
+                        log::trace!(
+                            "Storage::find_metadata_of_object({:?}) -> {:?}",
+                            object.location(),
+                            meta_object.location()
+                        );
                         return Ok(meta_object);
                     }
                 }
@@ -708,7 +720,7 @@ trait NewObjectAllocator: Debug {
         M: StorageMedium,
         [(); M::BLOCK_COUNT]:,
     {
-        log::trace!("Storage::find_new_object_location({self:?}, {len})");
+        log::trace!("{self:?}::find_new_object_location({self:?}, {len})");
 
         // find block with most free space
         let object_size = M::align(ObjectHeader::byte_count::<M>()) + len;
@@ -742,6 +754,7 @@ trait NewObjectAllocator: Debug {
         M: StorageMedium,
         [(); M::BLOCK_COUNT]:,
     {
+        log::debug!("{self:?}::try_to_free_space({len})");
         let Some((block_to_free, freeable)) = storage
             .blocks
             .find_block_to_free(Self::BLOCK_TYPE, len, &mut storage.medium)
@@ -799,10 +812,21 @@ impl NewObjectAllocator for DataObject {
         M: StorageMedium,
         [(); M::BLOCK_COUNT]:,
     {
+        log::trace!("{self:?}::move_object");
+
         let meta = storage.find_metadata_of_object(&object).await?;
         let new_meta_location = MetaObject
             .find_new_object_location(storage, meta.total_size())
             .await?;
+
+        log::debug!(
+            "Moving data object {:?} to {destination:?}",
+            object.location()
+        );
+        log::debug!(
+            "Moving meta object {:?} to {new_meta_location:?}",
+            meta.location()
+        );
 
         // copy metadata object while replacing current object location to new location
         let mut meta_writer = ObjectWriter::allocate(
@@ -872,6 +896,7 @@ impl NewObjectAllocator for MetaObject {
         M: StorageMedium,
         [(); M::BLOCK_COUNT]:,
     {
+        log::trace!("{self:?}::move_object");
         object.move_object(&mut storage.medium, destination).await
     }
 }
@@ -908,7 +933,7 @@ mod test {
         ram_nor_emulating::NorRamStorage,
     };
 
-    const LIPSUM: &[u8] = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Fusce in mi scelerisque, porttitor mi amet.";
+    const LIPSUM: &[u8] = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Fusce i";
 
     pub fn init_test() {
         _ = simple_logger::SimpleLogger::new()
@@ -1107,15 +1132,15 @@ mod test {
 
             let mut reader = storage.read("foo").await.expect("Failed to open file");
 
-            let mut buf = [0u8; 100];
+            let mut buf = [0u8; 64];
 
             // Read in two chunks to test that the reader resumes with the current byte
             reader
-                .read(&mut storage, &mut buf[0..50])
+                .read(&mut storage, &mut buf[0..32])
                 .await
                 .expect("Failed to read file");
             reader
-                .read(&mut storage, &mut buf[50..])
+                .read(&mut storage, &mut buf[32..])
                 .await
                 .expect("Failed to read file");
 
@@ -1178,7 +1203,27 @@ mod test {
                 .store("bar", LIPSUM, OnCollision::Overwrite)
                 .await
                 .is_err(),
-            "Lookup returned Ok unexpectedly"
+            "Store returned Ok unexpectedly"
         );
+    }
+
+    #[async_std::test]
+    async fn can_reuse_space_of_deleted_files() {
+        init_test();
+
+        let mut storage = create_default_fs().await;
+
+        storage
+            .store("foo", LIPSUM, OnCollision::Overwrite)
+            .await
+            .expect("Create failed");
+
+        storage.delete("foo").await.expect("Failed to delete");
+
+        storage.medium.debug_print();
+        storage
+            .store("bar", LIPSUM, OnCollision::Overwrite)
+            .await
+            .expect("Failed to store");
     }
 }

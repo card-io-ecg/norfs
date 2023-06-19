@@ -764,15 +764,12 @@ impl<M: StorageMedium> ObjectInfo<M> {
 
     async fn read(location: ObjectLocation, medium: &mut M) -> Result<Option<Self>, StorageError> {
         log::trace!("ObjectInfo::read({location:?})");
-        if location.offset + BlockHeader::<M>::byte_count() >= M::BLOCK_SIZE {
-            return Ok(None);
-        }
-
         let header = ObjectHeader::read(location, medium).await?;
+        log::trace!("ObjectInfo::read({location:?}) -> {header:?}");
+
         if header.state().is_free() {
             return Ok(None);
         }
-        log::trace!("ObjectInfo::read({location:?}) -> {header:?}");
 
         Ok(Some(Self::with_header(header)))
     }
@@ -836,10 +833,15 @@ impl ObjectIterator {
         &mut self,
         medium: &mut M,
     ) -> Result<Option<ObjectInfo<M>>, StorageError> {
+        if self.location.offset + BlockHeader::<M>::byte_count() >= M::BLOCK_SIZE {
+            return Ok(None);
+        }
+
         let info = ObjectInfo::read(self.location, medium).await?;
         if let Some(info) = info.as_ref() {
             self.location.offset += M::align(info.total_size());
         }
+
         Ok(info)
     }
 
