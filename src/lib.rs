@@ -460,14 +460,8 @@ where
     async fn lookup(&mut self, path: &str) -> Result<ObjectLocation, StorageError> {
         let path_hash = hash_path(path);
 
-        for block_idx in self
-            .blocks
-            .blocks
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, blk)| blk.is_metadata().then_some(idx))
-        {
-            let mut iter = ObjectIterator::new::<M>(block_idx);
+        for block in self.blocks.blocks(BlockType::Metadata) {
+            let mut iter = block.objects();
 
             'objs: while let Some(object) = iter.next(&mut self.medium).await? {
                 if object.state() != ObjectState::Finalized {
