@@ -566,9 +566,9 @@ where
         // filename + 1 data page
         let est_page_count = 1 + 1; // TODO: guess the number of data pages needed
 
-        // this is mutable because we can fail mid-writing
+        // this is mutable because we can fail mid-writing. 4 bytes to store the path hash
         let mut file_meta_location = MetaObject
-            .find_new_object_location(self, est_page_count * M::align(M::object_location_bytes()))
+            .find_new_object_location(self, 4 + est_page_count * M::object_location_bytes())
             .await?;
 
         // Write file name as data object
