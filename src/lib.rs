@@ -7,7 +7,7 @@
 use crate::{
     diag::Counters,
     ll::{
-        blocks::{BlockHeaderKind, BlockInfo, BlockOps, BlockType},
+        blocks::{BlockHeaderKind, BlockInfo, BlockOps, BlockType, IndexedBlockInfo},
         objects::{
             MetadataObjectHeader, ObjectHeader, ObjectIterator, ObjectLocation, ObjectReader,
             ObjectState, ObjectType, ObjectWriter,
@@ -98,6 +98,42 @@ where
 
         // No block found
         Err(StorageError::InsufficientSpace)
+    }
+
+    pub(crate) async fn find_block_to_free(
+        &mut self,
+        ty: BlockType,
+        len: usize,
+        medium: &mut M,
+    ) -> Result<Option<(usize, usize)>, StorageError> {
+        let mut target_block = None::<(usize, usize)>;
+
+        // Select block with enough freeable space and minimum erase counter
+        for (block_idx, info) in self
+            .blocks
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, block)| block.kind() == BlockHeaderKind::Known(ty))
+        {
+            let freeable = IndexedBlockInfo(block_idx, info)
+                .calculate_freeable_space(medium)
+                .await?;
+
+            if freeable > len {
+                match target_block {
+                    Some((idx, _)) => {
+                        if info.erase_count() < self.blocks[idx].erase_count() {
+                            target_block = Some((block_idx, freeable));
+                        }
+                    }
+
+                    None => target_block = Some((block_idx, freeable)),
+                }
+            }
+        }
+
+        Ok(target_block)
     }
 }
 
@@ -621,39 +657,19 @@ where
     }
 
     async fn try_to_free_space(&mut self, ty: BlockType, len: usize) -> Result<(), StorageError> {
-        let mut ops = BlockOps::new(&mut self.medium);
-
-        let mut target_block = None::<(usize, usize)>;
-
-        // Select block with enough freeable space and minimum erase counter
-        for (block_idx, info) in self
+        if let Some((target, freeable)) = self
             .blocks
-            .blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, block)| block.kind() == BlockHeaderKind::Known(ty))
+            .find_block_to_free(ty, len, &mut self.medium)
+            .await?
         {
-            let freeable = ops.calculate_freeable_space(block_idx).await?;
-
-            if freeable > len {
-                match target_block {
-                    Some((idx, _)) => {
-                        if info.erase_count() < self.blocks.blocks[idx].erase_count() {
-                            target_block = Some((block_idx, freeable));
-                        }
-                    }
-
-                    None => target_block = Some((block_idx, freeable)),
-                }
-            }
-        }
-
-        if let Some((target, freeable)) = target_block {
             if freeable != self.blocks.blocks[target].used_bytes() {
                 // TODO move objects out of target block
+                if ty == BlockType::Data {
+                    // TODO when moving a data object, update the file metadata
+                }
             }
 
-            ops.format_block(target).await?;
+            BlockOps::new(&mut self.medium).format_block(target).await?;
             self.blocks.blocks[target].update_stats_after_erase();
         }
 
