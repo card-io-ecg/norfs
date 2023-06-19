@@ -88,18 +88,20 @@ impl CompositeObjectState {
 
         if current_state > new_state {
             // Can't go backwards in state
+            log::error!("Can't change object state from {current_state:?} to {new_state:?}");
             return Err(StorageError::InvalidOperation);
         }
 
         if let Self::Allocated(ty, _) = self {
             // Can't change allocated object type
             if ty != object_type {
+                log::error!("Can't change object type from {ty:?} to {object_type:?}");
                 return Err(StorageError::InvalidOperation);
             }
         }
 
         let new_data_state = match new_state {
-            ObjectState::Free => return Err(StorageError::InvalidOperation),
+            ObjectState::Free => unreachable!(),
             ObjectState::Allocated => ObjectDataState::Untrusted,
             ObjectState::Finalized => ObjectDataState::Valid,
             ObjectState::Deleted => ObjectDataState::Deleted,
@@ -207,7 +209,10 @@ impl CompositeObjectState {
     fn object_type(self) -> Result<ObjectType, StorageError> {
         match self {
             Self::Allocated(ty, _) => Ok(ty),
-            Self::Free => Err(StorageError::InvalidOperation),
+            Self::Free => {
+                log::error!("Can't read object of type Free");
+                Err(StorageError::InvalidOperation)
+            }
         }
     }
 }
@@ -660,6 +665,7 @@ impl<M: StorageMedium> ObjectReader<M> {
                 // We can read data from unfinalized/deleted objects if the caller allows it.
             } else {
                 // We can only read data from finalized objects.
+                log::error!("Trying to read {:?} object", object.state());
                 return Err(StorageError::FsCorrupted);
             }
         }
