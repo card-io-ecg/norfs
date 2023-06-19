@@ -61,30 +61,22 @@ where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,
 {
-    fn alloc_in(&self, block: usize) -> ObjectLocation {
-        ObjectLocation {
-            block,
-            offset: self.blocks[block].used_bytes(),
-        }
-    }
-
-    fn find_alloc_block(
-        &self,
+    async fn allocate_new_object(
+        &mut self,
         ty: BlockType,
         min_free: usize,
+        medium: &mut M,
     ) -> Result<ObjectLocation, StorageError> {
-        log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
-
-        self.find_alloc_block_impl(ty, min_free, false)
+        self.allocate_object(ty, min_free, false, medium).await
     }
 
-    fn find_alloc_block_impl(
+    fn allocate_object_impl(
         &self,
         ty: BlockType,
         min_free: usize,
         allow_gc_block: bool,
-    ) -> Result<ObjectLocation, StorageError> {
-        log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
+    ) -> Result<usize, StorageError> {
+        log::trace!("Storage::allocate_object({ty:?}, {min_free}, {allow_gc_block:?})");
 
         // Try to find a used block with enough free space
         if let Some(block) = self
@@ -92,7 +84,7 @@ where
             .iter()
             .position(|info| info.is_type(ty) && !info.is_empty() && info.free_space() >= min_free)
         {
-            return Ok(self.alloc_in(block));
+            return Ok(block);
         }
 
         // We reserve 2 blocks for GC.
@@ -112,12 +104,36 @@ where
                 .filter(|(_, info)| info.is_unassigned() && info.free_space() >= min_free)
                 .min_by_key(|(_, info)| info.erase_count())
             {
-                return Ok(self.alloc_in(block));
+                return Ok(block);
             }
         }
 
         // No block found
         Err(StorageError::InsufficientSpace)
+    }
+
+    async fn allocate_object(
+        &mut self,
+        ty: BlockType,
+        min_free: usize,
+        allow_gc_block: bool,
+        medium: &mut M,
+    ) -> Result<ObjectLocation, StorageError> {
+        let location = self
+            .allocate_object_impl(ty, min_free, allow_gc_block)
+            .map(|block| ObjectLocation {
+                block,
+                offset: self.blocks[block].used_bytes(),
+            })?;
+
+        if self.blocks[location.block].is_unassigned() {
+            BlockOps::new(medium)
+                .set_block_type(location.block, ty)
+                .await?;
+            self.blocks[location.block].header.set_block_type(ty);
+        }
+
+        Ok(location)
     }
 
     pub(crate) async fn find_block_to_free(
@@ -664,21 +680,20 @@ where
 
         // find block with most free space
         let object_size = M::align(ObjectHeader::byte_count::<M>()) + len;
-        let location = match self.blocks.find_alloc_block(ty, object_size) {
+        let location = match self
+            .blocks
+            .allocate_new_object(ty, object_size, &mut self.medium)
+            .await
+        {
             Ok(block) => block,
             Err(StorageError::InsufficientSpace) => {
                 self.try_to_free_space(ty, object_size).await?;
-                self.blocks.find_alloc_block(ty, object_size)?
+                self.blocks
+                    .allocate_new_object(ty, object_size, &mut self.medium)
+                    .await?
             }
             Err(e) => return Err(e),
         };
-
-        if self.blocks.blocks[location.block].is_unassigned() {
-            BlockOps::new(&mut self.medium)
-                .set_block_type(location.block, ty)
-                .await?;
-            self.blocks.blocks[location.block].header.set_block_type(ty);
-        }
 
         log::trace!("Storage::find_new_object_location({ty:?}, {len}) -> {location:?}");
 
@@ -737,7 +752,8 @@ where
 
                 let copy_location = self
                     .blocks
-                    .find_alloc_block_impl(ty, object.total_size(), true)
+                    .allocate_object(ty, object.total_size(), true, &mut self.medium)
+                    .await
                     .map_err(|_| StorageError::InsufficientSpace)?;
 
                 if ty == BlockType::Data {
