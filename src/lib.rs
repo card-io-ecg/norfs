@@ -666,33 +666,56 @@ where
     }
 
     async fn try_to_free_space(&mut self, ty: BlockType, len: usize) -> Result<(), StorageError> {
-        if let Some((target, freeable)) = self
+        let Some((block_to_free, freeable)) = self
             .blocks
             .find_block_to_free(ty, len, &mut self.medium)
             .await?
-        {
-            if freeable != self.blocks.blocks[target].used_bytes() {
-                // We need to move objects out of this block
+        else {
+            return Err(StorageError::InsufficientSpace);
+        };
 
-                // TODO: for each object
+        if freeable != self.blocks.blocks[block_to_free].used_bytes() {
+            // We need to move objects out of this block
+            let mut iter = ObjectIterator::new::<M>(block_to_free);
+
+            while let Some(object) = iter.next(&mut self.medium).await? {
+                match object.state() {
+                    ObjectState::Free | ObjectState::Deleted => continue,
+                    ObjectState::Allocated => return Err(StorageError::InsufficientSpace), // TODO: retry in a different object
+                    ObjectState::Finalized => {}
+                }
+
                 let copy_target = self
                     .blocks
-                    .find_alloc_block_impl(ty, freeable, true)
+                    .find_alloc_block_impl(ty, object.total_size(), true)
                     .map_err(|_| StorageError::InsufficientSpace)?;
+                let copy_location = ObjectLocation {
+                    block: copy_target,
+                    offset: self.blocks.blocks[copy_target].used_bytes(),
+                };
 
                 if ty == BlockType::Data {
                     // TODO when moving a data object, update the file metadata
+                    // TODO: find metadata object
+                    // TODO: copy metadata object while replacing current object location to
+                    //       new location
+                    // TODO: copy object
+                    // TODO: finalize metadata object
+                    // TODO: delete old metadata object
+                    // TODO: delete old object
+                    return Err(StorageError::InsufficientSpace);
+                } else {
+                    object.move_object(&mut self.medium, copy_location).await?;
                 }
-
-                // Can not move object(s)
-                return Err(StorageError::InsufficientSpace);
             }
-
-            BlockOps::new(&mut self.medium).format_block(target).await?;
-            self.blocks.blocks[target].update_stats_after_erase();
         }
 
-        Err(StorageError::InsufficientSpace)
+        BlockOps::new(&mut self.medium)
+            .format_block(block_to_free)
+            .await?;
+        self.blocks.blocks[block_to_free].update_stats_after_erase();
+
+        Ok(())
     }
 }
 

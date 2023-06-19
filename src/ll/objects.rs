@@ -764,6 +764,24 @@ impl<M: StorageMedium> ObjectInfo<M> {
 
         Ok(Some(Self::with_header(header)))
     }
+
+    pub async fn move_object(
+        mut self,
+        medium: &mut M,
+        dst: ObjectLocation,
+    ) -> Result<(), StorageError> {
+        let mut source = ObjectReader::new(self.location(), medium, false).await?;
+        let mut target = ObjectWriter::allocate(dst, self.header.object_type()?, medium).await?;
+
+        let mut buffer = [0; 16];
+        while source.remaining() > 0 {
+            let read_size = source.read(medium, &mut buffer).await?;
+            target.write(medium, &buffer[0..read_size]).await?;
+        }
+
+        target.finalize(medium).await?;
+        self.header.update_state(medium, ObjectState::Deleted).await
+    }
 }
 
 pub struct ObjectIterator {
