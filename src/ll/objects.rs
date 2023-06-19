@@ -842,7 +842,7 @@ impl ObjectIterator {
         &mut self,
         medium: &mut M,
     ) -> Result<Option<ObjectInfo<M>>, StorageError> {
-        if self.location.offset + BlockHeader::<M>::byte_count() >= M::BLOCK_SIZE {
+        if self.location.offset >= M::BLOCK_SIZE {
             return Ok(None);
         }
 
