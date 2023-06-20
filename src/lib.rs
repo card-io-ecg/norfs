@@ -400,6 +400,11 @@ where
         if_exists: OnCollision,
     ) -> Result<(), StorageError> {
         log::debug!("Storage::store({path}, len = {})", data.len());
+
+        if self.estimate_data_chunks(data.len()).is_err() {
+            self.make_space_for(data.len()).await?;
+        }
+
         let overwritten_location = self.lookup(path).await;
 
         let overwritten = match overwritten_location {
@@ -456,6 +461,34 @@ where
         }
 
         Ok(size)
+    }
+
+    fn estimate_data_chunks(&self, mut len: usize) -> Result<usize, StorageError> {
+        let mut block_count = 0;
+
+        for ty in [BlockType::Data, BlockType::Undefined] {
+            for block in self.blocks.blocks(ty) {
+                let space = block
+                    .free_space()
+                    .saturating_sub(ObjectHeader::byte_count::<M>());
+
+                if space > 0 {
+                    len = len.saturating_sub(space);
+                    block_count += 1;
+
+                    if len == 0 {
+                        return Ok(block_count);
+                    }
+                }
+            }
+        }
+
+        Err(StorageError::InsufficientSpace)
+    }
+
+    async fn make_space_for(&mut self, len: usize) -> Result<(), StorageError> {
+        // TODO: free up space
+        Err(StorageError::InsufficientSpace)
     }
 
     async fn lookup(&mut self, path: &str) -> Result<ObjectLocation, StorageError> {
@@ -564,8 +597,8 @@ where
 
         let path_hash = hash_path(path);
 
-        // filename + 1 data page
-        let est_page_count = 1 + 1; // TODO: guess the number of data pages needed
+        // filename + data objects
+        let est_page_count = 1 + self.estimate_data_chunks(data.len())?;
 
         // this is mutable because we can fail mid-writing. 4 bytes to store the path hash
         let mut file_meta_location = MetaObject
