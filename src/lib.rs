@@ -725,21 +725,10 @@ trait NewObjectAllocator: Debug {
 
         // find block with most free space
         let object_size = M::align(ObjectHeader::byte_count::<M>()) + len;
-        let location = match storage
+        let location = storage
             .blocks
             .allocate_new_object(Self::BLOCK_TYPE, object_size, &mut storage.medium)
-            .await
-        {
-            Ok(block) => block,
-            Err(StorageError::InsufficientSpace) => {
-                self.try_to_free_space(storage, object_size).await?;
-                storage
-                    .blocks
-                    .allocate_new_object(Self::BLOCK_TYPE, object_size, &mut storage.medium)
-                    .await?
-            }
-            Err(e) => return Err(e),
-        };
+            .await?;
 
         log::trace!("Storage::find_new_object_location({self:?}, {len}) -> {location:?}");
 
