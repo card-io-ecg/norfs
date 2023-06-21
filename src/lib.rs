@@ -491,9 +491,9 @@ where
     async fn make_space_for(&mut self, path_len: usize, len: usize) -> Result<(), StorageError> {
         let mut meta_allocated = false;
         loop {
-            let blocks = match self
-                .estimate_data_chunks(len + path_len + M::align(ObjectHeader::byte_count::<M>()))
-            {
+            let blocks = match self.estimate_data_chunks(
+                M::align(len) + M::align(path_len) + M::align(ObjectHeader::byte_count::<M>()),
+            ) {
                 Ok(blocks) => blocks,
                 Err(StorageError::InsufficientSpace) => {
                     DataObject.try_to_make_space(self).await?;
@@ -1262,6 +1262,19 @@ mod test {
             assert_file_contents(&mut storage, "foo", b"bar").await;
             assert_file_contents(&mut storage, "baz", b"asdf").await;
         }
+
+        async fn can_reuse_space_of_deleted_files<M: StorageMedium>(
+            mut storage: Storage<M>,
+        ) {
+            for _ in 0..50 {
+                storage
+                    .store("foo", LIPSUM, OnCollision::Overwrite)
+                    .await
+                    .expect("Failed to create");
+
+                storage.delete("foo").await.expect("Failed to delete");
+            }
+        }
     }
 
     #[async_std::test]
@@ -1284,27 +1297,5 @@ mod test {
                 .is_err(),
             "Store returned Ok unexpectedly"
         );
-    }
-
-    #[async_std::test]
-    async fn can_reuse_space_of_deleted_files() {
-        init_test();
-
-        let mut storage = create_default_fs().await;
-
-        for _ in 0..50 {
-            storage
-                .store("foo", LIPSUM, OnCollision::Overwrite)
-                .await
-                .unwrap_or_else(|e| {
-                    storage.medium.debug_print();
-                    panic!("Create failed: {e:?}");
-                });
-
-            storage.delete("foo").await.unwrap_or_else(|e| {
-                storage.medium.debug_print();
-                panic!("Failed to delete: {e:?}");
-            });
-        }
     }
 }
