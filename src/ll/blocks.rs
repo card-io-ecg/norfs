@@ -396,7 +396,7 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
         }
 
         if erase {
-            log::trace!("Erasing block {block}");
+            log::debug!("Erasing block {block}");
             self.medium.erase(block).await?;
         }
 
