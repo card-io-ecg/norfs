@@ -26,7 +26,6 @@ pub trait FileDataWriter {
 pub struct Writer<M>
 where
     M: StorageMedium,
-    [(); M::BLOCK_COUNT]:,
 {
     metadata: ObjectWriter<M>,
     data: Option<ObjectWriter<M>>,

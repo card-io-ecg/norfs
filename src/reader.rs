@@ -8,7 +8,6 @@ use crate::{
 pub struct Reader<M>
 where
     M: StorageMedium,
-    [(); M::BLOCK_COUNT]:,
 {
     meta: MetadataObjectHeader<M>,
     current_object: Option<ObjectReader<M>>,
