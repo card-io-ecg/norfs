@@ -2,6 +2,7 @@
 #![feature(async_fn_in_trait)]
 #![feature(impl_trait_projections)]
 #![feature(generic_const_exprs)] // Eww
+#![feature(maybe_uninit_uninit_array, maybe_uninit_array_assume_init)]
 #![allow(incomplete_features)]
 
 use core::fmt::Debug;
