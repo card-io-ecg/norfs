@@ -226,3 +226,50 @@ where
         Ok(())
     }
 }
+
+pub struct BoundWriter<'a, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    writer: &'a mut Writer<M>,
+    storage: &'a mut Storage<M>,
+}
+
+impl<M> BoundWriter<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    pub async fn write(&mut self, buf: &[u8]) -> Result<usize, StorageError> {
+        self.writer.write(buf, self.storage).await
+    }
+
+    pub async fn write_all(&mut self, buf: &[u8]) -> Result<(), StorageError> {
+        self.writer.write_all(buf, self.storage).await
+    }
+}
+
+#[cfg(feature = "embedded-io")]
+impl<M> embedded_io::Io for BoundWriter<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    type Error = StorageError;
+}
+
+#[cfg(feature = "embedded-io")]
+impl<M> embedded_io::asynch::Write for BoundWriter<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        BoundWriter::write(self, buf).await
+    }
+
+    async fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        BoundWriter::write_all(self, buf).await
+    }
+}

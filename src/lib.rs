@@ -29,6 +29,8 @@ pub mod ll;
 pub mod medium;
 pub mod read_dir;
 pub mod reader;
+pub mod storable;
+pub mod varint;
 pub mod writer;
 
 /// Error values returned by storage operations.
@@ -57,6 +59,13 @@ pub enum StorageError {
 
     /// The input buffer is not large enough to hold the output.
     InsufficientBuffer,
+}
+
+#[cfg(feature = "embedded-io")]
+impl embedded_io::Error for StorageError {
+    fn kind(&self) -> embedded_io::ErrorKind {
+        embedded_io::ErrorKind::Other
+    }
 }
 
 struct BlockInfoCollection<M>
