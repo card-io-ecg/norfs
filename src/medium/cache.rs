@@ -87,6 +87,7 @@ impl<const SIZE: usize, const COUNT: usize> CachePages<SIZE, COUNT> {
     const COUNT_AT_LEAST_1: () = assert!(COUNT > 0);
 
     fn new() -> Self {
+        #[allow(clippy::let_unit_value)]
         let _ = Self::COUNT_AT_LEAST_1;
 
         Self {

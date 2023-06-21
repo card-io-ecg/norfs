@@ -3,7 +3,7 @@ use core::{
     ops::BitXor,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FxHasher {
     hash: u32,
 }
@@ -15,13 +15,6 @@ impl FxHasher {
             .rotate_left(5)
             .bitxor(word)
             .wrapping_mul(0x9e3779b9);
-    }
-}
-
-impl Default for FxHasher {
-    #[inline]
-    fn default() -> FxHasher {
-        FxHasher { hash: 0 }
     }
 }
 

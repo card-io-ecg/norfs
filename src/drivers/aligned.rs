@@ -173,7 +173,7 @@ where
                 let mut bytes_to_write = bytes_in_page.min(data.len());
 
                 let (src, remaining) = data.split_at(bytes_to_write);
-                buffer.data[..bytes_to_write].copy_from_slice(&src);
+                buffer.data[..bytes_to_write].copy_from_slice(src);
 
                 if bytes_to_write % 4 != 0 {
                     let pad = 4 - bytes_to_write % 4;
