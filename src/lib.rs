@@ -34,7 +34,7 @@ pub mod varint;
 pub mod writer;
 
 /// Error values returned by storage operations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageError {
     /// The file does not exist.
     NotFound,
@@ -887,28 +887,28 @@ mod test {
         println!();
     }
 
-    async fn create_default_fs() -> Storage<NorRamStorage<256, 32>> {
+    pub(crate) async fn create_default_fs() -> Storage<NorRamStorage<256, 32>> {
         let medium = NorRamStorage::<256, 32>::new();
         Storage::format_and_mount(medium)
             .await
             .expect("Failed to mount storage")
     }
 
-    async fn create_larger_fs() -> Storage<NorRamStorage<1024, 256>> {
+    pub(crate) async fn create_larger_fs() -> Storage<NorRamStorage<1024, 256>> {
         let medium = NorRamStorage::<1024, 256>::new();
         Storage::format_and_mount(medium)
             .await
             .expect("Failed to mount storage")
     }
 
-    async fn create_aligned_fs() -> Storage<AlignedNorRamStorage<1024, 256>> {
+    pub(crate) async fn create_aligned_fs() -> Storage<AlignedNorRamStorage<1024, 256>> {
         let medium = AlignedNorRamStorage::<1024, 256>::new();
         Storage::format_and_mount(medium)
             .await
             .expect("Failed to mount storage")
     }
 
-    async fn create_aligned_fs_with_read_cache(
+    pub(crate) async fn create_aligned_fs_with_read_cache(
     ) -> Storage<ReadCache<AlignedNorRamStorage<1024, 256>, 256, 2>> {
         let medium = ReadCache::new(AlignedNorRamStorage::<1024, 256>::new());
         Storage::format_and_mount(medium)
@@ -916,7 +916,7 @@ mod test {
             .expect("Failed to mount storage")
     }
 
-    async fn create_word_granularity_fs<const GRANULARITY: usize>(
+    pub(crate) async fn create_word_granularity_fs<const GRANULARITY: usize>(
     ) -> Storage<RamStorage<512, 64, GRANULARITY>>
     where
         [(); RamStorage::<512, 64, GRANULARITY>::BLOCK_COUNT]:,
@@ -927,7 +927,7 @@ mod test {
             .expect("Failed to mount storage")
     }
 
-    async fn assert_file_contents<M: StorageMedium>(
+    pub(crate) async fn assert_file_contents<M: StorageMedium>(
         storage: &mut Storage<M>,
         path: &str,
         expected: &[u8],
@@ -954,6 +954,7 @@ mod test {
         assert_eq!(contents, expected);
     }
 
+    #[macro_export]
     macro_rules! test_cases {
         (
             $(async fn $test_name:ident<M: StorageMedium>(mut $storage:ident: Storage<M> $(,)?) $code:tt)+
@@ -968,20 +969,20 @@ mod test {
                         $code
                     }
 
-                    init_test();
+                    crate::test::init_test();
 
                     log::info!("Running test case with create_default_fs");
-                    test_case_impl(create_default_fs().await).await;
+                    test_case_impl(crate::test::create_default_fs().await).await;
                     log::info!("Running test case with create_larger_fs");
-                    test_case_impl(create_larger_fs().await).await;
+                    test_case_impl(crate::test::create_larger_fs().await).await;
                     log::info!("Running test case with create_word_granularity_fs::<1>");
-                    test_case_impl(create_word_granularity_fs::<1>().await).await;
+                    test_case_impl(crate::test::create_word_granularity_fs::<1>().await).await;
                     log::info!("Running test case with create_word_granularity_fs::<4>");
-                    test_case_impl(create_word_granularity_fs::<4>().await).await;
+                    test_case_impl(crate::test::create_word_granularity_fs::<4>().await).await;
                     log::info!("Running test case with create_aligned_fs");
-                    test_case_impl(create_aligned_fs().await).await;
+                    test_case_impl(crate::test::create_aligned_fs().await).await;
                     log::info!("Running test case with create_aligned_fs_with_read_cache");
-                    test_case_impl(create_aligned_fs_with_read_cache().await).await;
+                    test_case_impl(crate::test::create_aligned_fs_with_read_cache().await).await;
                 }
             )+
         };

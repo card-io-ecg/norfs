@@ -122,7 +122,7 @@ impl Storable for Varint {
         for i in 0..varint_bytes::<u64>() {
             encoded[i] = value.to_le_bytes()[0];
             if value < 128 {
-                return writer.write_all(&encoded[..i]).await;
+                return writer.write_all(&encoded[..=i]).await;
             }
 
             encoded[i] |= 0x80;

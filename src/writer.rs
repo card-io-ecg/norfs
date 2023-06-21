@@ -225,6 +225,17 @@ where
 
         Ok(())
     }
+
+    pub fn bind<'a>(&'a mut self, storage: &'a mut Storage<M>) -> BoundWriter<'a, M>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]:,
+    {
+        BoundWriter {
+            writer: self,
+            storage,
+        }
+    }
 }
 
 pub struct BoundWriter<'a, M>
