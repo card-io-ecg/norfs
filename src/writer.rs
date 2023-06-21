@@ -160,7 +160,7 @@ where
     pub async fn create(
         path: &str,
         storage: &mut Storage<M>,
-        op: impl FileDataWriter,
+        op: &impl FileDataWriter,
     ) -> Result<(), StorageError> {
         log::debug!("Writer::create(path = {:?})", path);
 

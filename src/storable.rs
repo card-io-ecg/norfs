@@ -163,7 +163,7 @@ mod test {
             storage
                 .store_writer(
                     "data",
-                    TestType::C(12345),
+                    &TestType::C(12345),
                     OnCollision::Overwrite,
                 )
                 .await

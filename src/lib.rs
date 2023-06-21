@@ -346,7 +346,7 @@ where
             }
         }
 
-        self.store_writer(path, DataWriter(data), if_exists).await
+        self.store_writer(path, &DataWriter(data), if_exists).await
     }
 
     /// Creates a new file at `path` with the given `data`.
@@ -357,7 +357,7 @@ where
     pub async fn store_writer(
         &mut self,
         path: &str,
-        data: impl FileDataWriter,
+        data: &impl FileDataWriter,
         if_exists: OnCollision,
     ) -> Result<(), StorageError> {
         log::debug!(
@@ -386,7 +386,7 @@ where
         }
 
         // TODO: reuse filename object
-        self.create_new_file(path, data).await?;
+        Writer::create(path, self, data).await?;
 
         if let Some(location) = overwritten {
             self.delete_file_at(location).await?;
@@ -588,14 +588,6 @@ where
         meta_writer
             .write(&mut self.medium, &bytes[..byte_count])
             .await
-    }
-
-    async fn create_new_file(
-        &mut self,
-        path: &str,
-        data: impl FileDataWriter,
-    ) -> Result<(), StorageError> {
-        Writer::create(path, self, data).await
     }
 
     async fn find_metadata_of_object(
