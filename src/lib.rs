@@ -924,7 +924,13 @@ impl ObjectMover for DataObject {
                 &old_object_reader.path_hash.to_le_bytes(),
             )
             .await?;
-        let (bytes, byte_count) = old_object_reader.filename_location.into_bytes::<M>();
+
+        let filename_location = if old_object_reader.filename_location == object.location() {
+            destination
+        } else {
+            old_object_reader.filename_location
+        };
+        let (bytes, byte_count) = filename_location.into_bytes::<M>();
         meta_writer
             .write(&mut storage.medium, &bytes[..byte_count])
             .await?;
@@ -939,7 +945,6 @@ impl ObjectMover for DataObject {
             } else {
                 loc
             };
-
             let (bytes, byte_count) = location.into_bytes::<M>();
             meta_writer
                 .write(&mut storage.medium, &bytes[..byte_count])
