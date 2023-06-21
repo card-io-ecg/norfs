@@ -609,6 +609,10 @@ impl<M: StorageMedium> ObjectWriter<M> {
         self.object.update_state(medium, state).await
     }
 
+    pub fn location(&self) -> ObjectLocation {
+        self.object.location
+    }
+
     pub fn payload_size(&self) -> usize {
         self.cursor + self.buffer.len()
     }
@@ -641,6 +645,20 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         self.set_state(medium, ObjectState::Deleted).await
+    }
+
+    pub(crate) async fn copy_from(
+        &mut self,
+        source: &mut ObjectReader<M>,
+        medium: &mut M,
+    ) -> Result<(), StorageError> {
+        let mut buffer = [0; 16];
+        while source.remaining() > 0 {
+            let read_size = source.read(medium, &mut buffer).await?;
+            self.write(medium, &buffer[0..read_size]).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -789,15 +807,11 @@ impl<M: StorageMedium> ObjectInfo<M> {
         &self,
         medium: &mut M,
         dst: ObjectLocation,
-    ) -> Result<ObjectInfo<M>, StorageError> {
+    ) -> Result<Self, StorageError> {
         let mut source = ObjectReader::new(self.location(), medium, false).await?;
         let mut target = ObjectWriter::allocate(dst, self.header.object_type()?, medium).await?;
 
-        let mut buffer = [0; 16];
-        while source.remaining() > 0 {
-            let read_size = source.read(medium, &mut buffer).await?;
-            target.write(medium, &buffer[0..read_size]).await?;
-        }
+        target.copy_from(&mut source, medium).await?;
 
         target.finalize(medium).await
     }
@@ -806,7 +820,7 @@ impl<M: StorageMedium> ObjectInfo<M> {
         self,
         medium: &mut M,
         dst: ObjectLocation,
-    ) -> Result<ObjectInfo<M>, StorageError> {
+    ) -> Result<Self, StorageError> {
         let new = self.copy_object(medium, dst).await?;
         self.delete(medium).await?;
 

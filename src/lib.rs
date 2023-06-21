@@ -11,11 +11,13 @@ use crate::{
     ll::{
         blocks::{BlockHeaderKind, BlockInfo, BlockOps, BlockType, IndexedBlockInfo},
         objects::{
-            MetadataObjectHeader, ObjectHeader, ObjectInfo, ObjectIterator, ObjectLocation,
-            ObjectReader, ObjectState, ObjectType, ObjectWriter,
+            ObjectHeader, ObjectInfo, ObjectIterator, ObjectLocation, ObjectReader, ObjectState,
+            ObjectType, ObjectWriter,
         },
     },
     medium::{StorageMedium, StoragePrivate},
+    reader::Reader,
+    writer::{FileDataWriter, Writer},
 };
 
 pub mod diag;
@@ -24,6 +26,8 @@ pub mod fxhash;
 pub mod gc;
 pub mod ll;
 pub mod medium;
+pub mod reader;
+pub mod writer;
 
 /// Error values returned by storage operations.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -213,106 +217,6 @@ pub enum OnCollision {
     Fail,
 }
 
-/// File reader
-pub struct Reader<M>
-where
-    M: StorageMedium,
-    [(); M::BLOCK_COUNT]:,
-{
-    meta: MetadataObjectHeader<M>,
-    current_object: Option<ObjectReader<M>>,
-}
-
-impl<M> Reader<M>
-where
-    M: StorageMedium,
-    [(); M::BLOCK_COUNT]:,
-{
-    async fn select_next_object(&mut self, medium: &mut M) -> Result<(), StorageError> {
-        self.current_object = if let Some(object) = self.meta.next_object_location(medium).await? {
-            Some(ObjectReader::new(object, medium, false).await?)
-        } else {
-            None
-        };
-
-        Ok(())
-    }
-
-    /// Reads data from the current position in the file.
-    ///
-    /// Returns the number of bytes read.
-    ///
-    /// `storage` must be the same storage that was used to open the file.
-    pub async fn read(
-        &mut self,
-        storage: &mut Storage<M>,
-        mut buf: &mut [u8],
-    ) -> Result<usize, StorageError> {
-        log::debug!("Reader::read(len = {})", buf.len());
-
-        let medium = &mut storage.medium;
-
-        if self.current_object.is_none() {
-            self.select_next_object(medium).await?;
-        }
-
-        let len = buf.len();
-
-        loop {
-            let Some(reader) = self.current_object.as_mut() else {
-                // EOF
-                break;
-            };
-
-            let read = reader.read(medium, buf).await?;
-            buf = &mut buf[read..];
-
-            if buf.is_empty() {
-                // Buffer is full
-                break;
-            }
-
-            self.select_next_object(medium).await?;
-        }
-
-        Ok(len - buf.len())
-    }
-
-    pub async fn read_all(
-        &mut self,
-        storage: &mut Storage<M>,
-        buf: &mut [u8],
-    ) -> Result<(), StorageError> {
-        log::debug!("Reader::read_all(len = {})", buf.len());
-
-        if !buf.is_empty() {
-            let read = self.read(storage, buf).await?;
-            if read == 0 {
-                return Err(StorageError::EndOfFile);
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn read_array<const N: usize>(
-        &mut self,
-        storage: &mut Storage<M>,
-    ) -> Result<[u8; N], StorageError> {
-        let mut buf = [0u8; N];
-
-        self.read_all(storage, &mut buf).await?;
-
-        Ok(buf)
-    }
-
-    pub async fn read_one(&mut self, storage: &mut Storage<M>) -> Result<u8, StorageError> {
-        let buf = self.read_array::<1>(storage).await?;
-
-        Ok(buf[0])
-    }
-}
-
 impl<M> Storage<M>
 where
     M: StorageMedium,
@@ -409,34 +313,72 @@ where
         data: &[u8],
         if_exists: OnCollision,
     ) -> Result<(), StorageError> {
-        log::debug!("Storage::store({path}, len = {})", data.len());
+        struct DataWriter<'a>(&'a [u8]);
+        impl FileDataWriter for DataWriter<'_> {
+            async fn write<M>(
+                &mut self,
+                writer: &mut Writer<M>,
+                storage: &mut Storage<M>,
+            ) -> Result<(), StorageError>
+            where
+                M: StorageMedium,
+                [(); M::BLOCK_COUNT]:,
+            {
+                writer.write_all(self.0, storage).await
+            }
 
-        self.make_space_for(path.len(), data.len()).await?;
+            fn estimate_length(&self) -> usize {
+                self.0.len()
+            }
+        }
+
+        self.store_writer(path, DataWriter(data), if_exists).await
+    }
+
+    /// Creates a new file at `path` with the given `data`.
+    ///
+    /// If a file already exists at `path`, the behaviour is determined by `if_exists`.
+    ///  - `OnCollision::Overwrite` will overwrite the existing file.
+    ///  - `OnCollision::Fail` will return an error.
+    pub async fn store_writer(
+        &mut self,
+        path: &str,
+        data: impl FileDataWriter,
+        if_exists: OnCollision,
+    ) -> Result<(), StorageError> {
+        log::debug!(
+            "Storage::store_writer({path}, estimated = {})",
+            data.estimate_length()
+        );
+
+        self.make_space_for(path.len(), data.estimate_length())
+            .await?;
 
         let overwritten_location = self.lookup(path).await;
 
         let overwritten = match overwritten_location {
-            Ok(location) => Some(location),
+            Ok(overwritten) => Some(overwritten),
             Err(StorageError::NotFound) => None,
             Err(e) => return Err(e),
         };
 
-        if overwritten.is_none() || if_exists == OnCollision::Overwrite {
-            if let Some(overwritten) = overwritten {
-                log::debug!("Overwriting location: {:?}", overwritten);
-            }
-
-            self.create_new_file(path, data).await?;
-
-            if let Some(location) = overwritten {
-                self.delete_file_at(location).await?;
-            }
-
-            Ok(())
-        } else {
-            log::debug!("File already exists at path: {}", path);
-            Err(StorageError::InvalidOperation)
+        if overwritten.is_some() && if_exists == OnCollision::Fail {
+            log::debug!("File already exists at path: {path}");
+            return Err(StorageError::InvalidOperation);
         }
+
+        if let Some(overwritten) = overwritten.as_ref() {
+            log::debug!("Overwriting location: {overwritten:?}");
+        }
+
+        // TODO: reuse filename object
+        self.create_new_file(path, data).await?;
+
+        if let Some(location) = overwritten {
+            self.delete_file_at(location).await?;
+        }
+
+        Ok(())
     }
 
     /// Convenience method for checking if a file exists. Ignores all errors.
@@ -453,10 +395,8 @@ where
     pub async fn read(&mut self, path: &str) -> Result<Reader<M>, StorageError> {
         log::debug!("Storage::read({path})");
         let object = self.lookup(path).await?;
-        Ok(Reader {
-            meta: object.read_metadata(&mut self.medium).await?,
-            current_object: None,
-        })
+        let metadata = object.read_metadata(&mut self.medium).await?;
+        Ok(Reader::new(metadata))
     }
 
     /// Returns the content size of the file at `path`.
@@ -631,118 +571,12 @@ where
             .await
     }
 
-    async fn create_new_file(&mut self, path: &str, mut data: &[u8]) -> Result<(), StorageError> {
-        log::trace!("Storage::create_new_file({:?})", path);
-
-        if path.contains(&['/', '\\'][..]) {
-            log::warn!("Path contains invalid characters");
-            return Err(StorageError::InvalidOperation);
-        }
-
-        let path_hash = hash_path(path);
-
-        // filename + data objects
-        let est_page_count = 1 + self.estimate_data_chunks(data.len())?;
-
-        // this is mutable because we can fail mid-writing. 4 bytes to store the path hash
-        let mut file_meta_location = self
-            .find_new_object_location(
-                BlockType::Metadata,
-                4 + est_page_count * M::object_location_bytes(),
-            )
-            .await?;
-
-        // Write file name as data object
-        let filename_location = self
-            .find_new_object_location(BlockType::Data, path.len())
-            .await?;
-
-        self.write_object(filename_location, path.as_bytes())
-            .await?;
-
-        // Write a non-finalized header obejct
-        let mut meta_writer = ObjectWriter::allocate(
-            file_meta_location,
-            ObjectType::FileMetadata,
-            &mut self.medium,
-        )
-        .await?;
-        meta_writer
-            .write(&mut self.medium, &path_hash.to_le_bytes())
-            .await?;
-
-        self.write_location(&mut meta_writer, filename_location)
-            .await?;
-
-        // Write data objects
-        while !data.is_empty() {
-            // Write file name as data object
-            let chunk_location = self.find_new_object_location(BlockType::Data, 0).await?;
-            let max_chunk_len = self.blocks.blocks[chunk_location.block].free_space()
-                - ObjectHeader::byte_count::<M>();
-
-            log::debug!("Max chunk len: {max_chunk_len}");
-
-            let (chunk, remaining) = data.split_at(data.len().min(max_chunk_len));
-            data = remaining;
-
-            self.write_object(chunk_location, chunk).await?;
-
-            match self.write_location(&mut meta_writer, chunk_location).await {
-                Ok(()) => {}
-                Err(StorageError::InsufficientSpace) => {
-                    log::debug!("Reallocating metadata object");
-                    // Old object's accounting
-                    self.blocks.blocks[file_meta_location.block]
-                        .add_used_bytes(meta_writer.total_size());
-
-                    let new_file_meta_location = self
-                        .find_new_object_location(
-                            BlockType::Metadata,
-                            meta_writer.payload_size() + M::object_location_bytes(),
-                        )
-                        .await?;
-
-                    let mut new_meta_writer = ObjectWriter::allocate(
-                        new_file_meta_location,
-                        ObjectType::FileMetadata,
-                        &mut self.medium,
-                    )
-                    .await?;
-
-                    // TODO: seek over object size when added - it should be the first for simplicity
-
-                    // Copy old object
-                    let mut buf = [0u8; 16];
-                    let mut old_object_reader =
-                        ObjectReader::new(file_meta_location, &mut self.medium, false).await?;
-                    loop {
-                        let bytes_read = old_object_reader.read(&mut self.medium, &mut buf).await?;
-
-                        if bytes_read == 0 {
-                            break;
-                        }
-
-                        new_meta_writer
-                            .write(&mut self.medium, &buf[..bytes_read])
-                            .await?;
-                    }
-
-                    meta_writer.delete(&mut self.medium).await?;
-
-                    meta_writer = new_meta_writer;
-                    file_meta_location = new_file_meta_location;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-
-        // TODO: store data length
-        // Finalize header object
-        let object_total_size = meta_writer.finalize(&mut self.medium).await?.total_size();
-        self.blocks.blocks[file_meta_location.block].add_used_bytes(object_total_size);
-
-        Ok(())
+    async fn create_new_file(
+        &mut self,
+        path: &str,
+        data: impl FileDataWriter,
+    ) -> Result<(), StorageError> {
+        Writer::create(path, self, data).await
     }
 
     async fn find_metadata_of_object(
