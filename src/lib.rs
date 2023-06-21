@@ -324,8 +324,7 @@ where
                 M: StorageMedium,
                 [(); M::BLOCK_COUNT]:,
             {
-                writer.write(self.0, storage).await?;
-                Ok(())
+                writer.write_all(self.0, storage).await
             }
 
             fn estimate_length(&self) -> usize {

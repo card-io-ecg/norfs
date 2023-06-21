@@ -99,12 +99,19 @@ where
         &mut self,
         mut data: &[u8],
         storage: &mut Storage<M>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<usize, StorageError> {
+        let mut written = 0;
         while !data.is_empty() {
             let data_object = if let Some(writer) = self.data.as_mut() {
                 writer
             } else {
-                let data_location = storage.find_new_object_location(BlockType::Data, 0).await?;
+                let data_location = match storage.find_new_object_location(BlockType::Data, 0).await
+                {
+                    Ok(loc) => loc,
+                    Err(StorageError::InsufficientSpace) => return Ok(written),
+                    Err(e) => return Err(e),
+                };
+
                 let writer = ObjectWriter::allocate(
                     data_location,
                     ObjectType::FileData,
@@ -122,6 +129,7 @@ where
                 let (store, remaining) = data.split_at(chunk_len);
 
                 data_object.write(&mut storage.medium, store).await?;
+                written += store.len();
 
                 data = remaining;
             }
@@ -132,6 +140,18 @@ where
                 storage.blocks.blocks[finalized.location().block]
                     .add_used_bytes(finalized.total_size());
             }
+        }
+
+        Ok(written)
+    }
+
+    pub async fn write_all(
+        &mut self,
+        data: &[u8],
+        storage: &mut Storage<M>,
+    ) -> Result<(), StorageError> {
+        if self.write(data, storage).await? != data.len() {
+            return Err(StorageError::InsufficientSpace);
         }
 
         Ok(())
