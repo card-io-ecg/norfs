@@ -92,14 +92,21 @@ where
     ) -> Result<usize, StorageError> {
         log::trace!("Storage::allocate_object({ty:?}, {min_free}, {allow_gc_block:?})");
 
+        // Predicates
+        fn and<M: StorageMedium>(
+            a: impl Fn(&IndexedBlockInfo<M>) -> bool,
+            b: impl Fn(&IndexedBlockInfo<M>) -> bool,
+        ) -> impl Fn(&IndexedBlockInfo<M>) -> bool {
+            move |info: &IndexedBlockInfo<M>| a(info) && b(info)
+        }
+        let has_enough_free_space = move |info: &IndexedBlockInfo<M>| info.free_space() >= min_free;
+        let not_empty = |info: &IndexedBlockInfo<M>| !info.is_empty();
+
         // Try to find a used block with enough free space
-        if let Some(block) = self
-            .blocks(ty)
-            .find(|info| !info.is_empty() && info.free_space() >= min_free)
-        {
+        if let Some(block) = self.blocks(ty).find(and(not_empty, has_enough_free_space)) {
             return Ok(block.0);
         }
-        if let Some(block) = self.blocks(ty).find(|info| info.free_space() >= min_free) {
+        if let Some(block) = self.blocks(ty).find(has_enough_free_space) {
             return Ok(block.0);
         }
 
@@ -108,7 +115,7 @@ where
             // Pick a free block. Prioritize lesser used blocks.
             if let Some(block) = self
                 .blocks(BlockType::Undefined)
-                .filter(|info| info.free_space() >= min_free)
+                .filter(has_enough_free_space)
                 .min_by_key(|info| info.erase_count())
             {
                 return Ok(block.0);
