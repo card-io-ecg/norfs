@@ -176,3 +176,13 @@ impl<T: Storable, E: Storable> Storable for Result<T, E> {
         }
     }
 }
+
+impl Storable for &str {
+    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]: Sized,
+    {
+        writer.write_all(self.as_bytes()).await
+    }
+}
