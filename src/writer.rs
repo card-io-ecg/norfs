@@ -74,28 +74,17 @@ where
         .await?;
 
         let old_metadata = core::mem::replace(&mut self.metadata, new_meta_writer);
-        let old_location = old_metadata.location();
         let old_metadata = old_metadata.finalize(&mut storage.medium).await?;
 
         // TODO: seek over object size when added - it should be the first for simplicity
 
         // Copy old object
-        let mut buf = [0u8; 16];
         let mut old_object_reader =
-            ObjectReader::new(old_location, &mut storage.medium, false).await?;
-        loop {
-            let bytes_read = old_object_reader
-                .read(&mut storage.medium, &mut buf)
-                .await?;
+            ObjectReader::new(old_metadata.location(), &mut storage.medium, false).await?;
 
-            if bytes_read == 0 {
-                break;
-            }
-
-            self.metadata
-                .write(&mut storage.medium, &buf[..bytes_read])
-                .await?;
-        }
+        self.metadata
+            .copy_from(&mut old_object_reader, &mut storage.medium)
+            .await?;
 
         // Append location
         self.metadata
