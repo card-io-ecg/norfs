@@ -1,14 +1,14 @@
 use crate::{
     medium::StorageMedium,
     reader::BoundReader,
-    storable::{LoadError, Storable},
+    storable::{LoadError, Loadable, Storable},
     writer::BoundWriter,
     StorageError,
 };
 
-impl<T, const N: usize> Storable for heapless::Vec<T, N>
+impl<T, const N: usize> Loadable for heapless::Vec<T, N>
 where
-    T: Storable,
+    T: Loadable,
 {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
@@ -26,7 +26,12 @@ where
 
         Ok(vec)
     }
+}
 
+impl<T, const N: usize> Storable for heapless::Vec<T, N>
+where
+    T: Storable,
+{
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,
@@ -42,7 +47,7 @@ where
     }
 }
 
-impl<const N: usize> Storable for heapless::String<N> {
+impl<const N: usize> Loadable for heapless::String<N> {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
@@ -66,7 +71,9 @@ impl<const N: usize> Storable for heapless::String<N> {
 
         Ok(string)
     }
+}
 
+impl<const N: usize> Storable for heapless::String<N> {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,

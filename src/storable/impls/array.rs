@@ -3,14 +3,14 @@ use core::mem::MaybeUninit;
 use crate::{
     medium::StorageMedium,
     reader::BoundReader,
-    storable::{LoadError, Storable},
+    storable::{LoadError, Loadable, Storable},
     writer::BoundWriter,
     StorageError,
 };
 
-impl<T, const N: usize> Storable for [T; N]
+impl<T, const N: usize> Loadable for [T; N]
 where
-    T: Storable,
+    T: Loadable,
 {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
@@ -25,7 +25,12 @@ where
 
         Ok(unsafe { MaybeUninit::array_assume_init(array) })
     }
+}
 
+impl<T, const N: usize> Storable for [T; N]
+where
+    T: Storable,
+{
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,

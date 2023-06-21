@@ -21,12 +21,14 @@ impl From<Infallible> for LoadError {
     }
 }
 
-pub trait Storable: Sized {
+pub trait Loadable: Sized {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
         [(); M::BLOCK_COUNT]: Sized;
+}
 
+pub trait Storable: Sized {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,
@@ -53,8 +55,11 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        reader::BoundReader, storable::Storable, test_cases, writer::BoundWriter, OnCollision,
-        Storage, StorageError, StorageMedium,
+        reader::BoundReader,
+        storable::{Loadable, Storable},
+        test_cases,
+        writer::BoundWriter,
+        OnCollision, Storage, StorageError, StorageMedium,
     };
 
     use super::LoadError;
@@ -66,7 +71,7 @@ mod test {
         C(u16),
     }
 
-    impl Storable for TestType {
+    impl Loadable for TestType {
         async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
         where
             M: StorageMedium,
@@ -84,7 +89,9 @@ mod test {
 
             Ok(data)
         }
+    }
 
+    impl Storable for TestType {
         async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
         where
             M: StorageMedium,

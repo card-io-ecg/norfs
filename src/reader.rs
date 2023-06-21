@@ -3,7 +3,7 @@ use embedded_io::blocking::ReadExactError;
 use crate::{
     ll::objects::{MetadataObjectHeader, ObjectReader},
     medium::StorageMedium,
-    storable::{LoadError, Storable},
+    storable::{LoadError, Loadable},
     Storage, StorageError,
 };
 
@@ -112,7 +112,7 @@ where
         Ok(buf[0])
     }
 
-    pub async fn read_loadable<T: Storable>(
+    pub async fn read_loadable<T: Loadable>(
         &mut self,
         storage: &mut Storage<M>,
     ) -> Result<T, LoadError> {

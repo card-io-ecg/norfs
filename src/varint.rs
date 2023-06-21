@@ -3,7 +3,7 @@ use core::convert::Infallible;
 use crate::{
     medium::StorageMedium,
     reader::BoundReader,
-    storable::{LoadError, Storable},
+    storable::{LoadError, Loadable, Storable},
     writer::BoundWriter,
     StorageError,
 };
@@ -89,7 +89,7 @@ pub const fn max_of_last_byte<T: Sized>() -> u8 {
     (1 << extra_bits) - 1
 }
 
-impl Storable for Varint {
+impl Loadable for Varint {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
@@ -111,7 +111,9 @@ impl Storable for Varint {
         }
         Err(LoadError::InvalidValue)
     }
+}
 
+impl Storable for Varint {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,

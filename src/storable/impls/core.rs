@@ -1,7 +1,7 @@
 use crate::{
     medium::StorageMedium,
     reader::BoundReader,
-    storable::{LoadError, Storable},
+    storable::{LoadError, Loadable, Storable},
     varint::Varint,
     writer::BoundWriter,
     StorageError,
@@ -9,7 +9,7 @@ use crate::{
 
 macro_rules! load_le_bytes {
     ($ty:ty => $proxy:ty) => {
-        impl Storable for $ty {
+        impl Loadable for $ty {
             async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
             where
                 M: StorageMedium,
@@ -19,7 +19,9 @@ macro_rules! load_le_bytes {
                 let value = <$ty>::try_from(proxy)?;
                 Ok(value)
             }
+        }
 
+        impl Storable for $ty {
             async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
             where
                 M: StorageMedium,
@@ -32,7 +34,7 @@ macro_rules! load_le_bytes {
     };
 }
 
-impl Storable for u8 {
+impl Loadable for u8 {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
@@ -40,7 +42,9 @@ impl Storable for u8 {
     {
         reader.read_one().await.map_err(LoadError::Io)
     }
+}
 
+impl Storable for u8 {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,
@@ -50,7 +54,7 @@ impl Storable for u8 {
     }
 }
 
-impl Storable for bool {
+impl Loadable for bool {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
@@ -58,7 +62,9 @@ impl Storable for bool {
     {
         Ok(u8::load(reader).await? != 0)
     }
+}
 
+impl Storable for bool {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,
@@ -73,7 +79,7 @@ load_le_bytes!(u32 => Varint);
 load_le_bytes!(u64 => Varint);
 load_le_bytes!(usize => Varint);
 
-impl Storable for char {
+impl Loadable for char {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
@@ -90,7 +96,9 @@ impl Storable for char {
             .map_err(|_| LoadError::InvalidValue)
             .and_then(|s| s.chars().next().ok_or(LoadError::InvalidValue))
     }
+}
 
+impl Storable for char {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,
@@ -102,7 +110,7 @@ impl Storable for char {
     }
 }
 
-impl<T: Storable> Storable for Option<T> {
+impl<T: Loadable> Loadable for Option<T> {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
@@ -116,7 +124,9 @@ impl<T: Storable> Storable for Option<T> {
 
         Ok(value)
     }
+}
 
+impl<T: Storable> Storable for Option<T> {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,
@@ -132,7 +142,7 @@ impl<T: Storable> Storable for Option<T> {
     }
 }
 
-impl<T: Storable, E: Storable> Storable for Result<T, E> {
+impl<T: Loadable, E: Loadable> Loadable for Result<T, E> {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
         M: StorageMedium,
@@ -146,7 +156,9 @@ impl<T: Storable, E: Storable> Storable for Result<T, E> {
 
         Ok(value)
     }
+}
 
+impl<T: Storable, E: Storable> Storable for Result<T, E> {
     async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
     where
         M: StorageMedium,
