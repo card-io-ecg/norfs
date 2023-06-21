@@ -941,9 +941,12 @@ impl ObjectMover for DataObject {
 
         // copy data object
         let copied = object.copy_object(&mut storage.medium, destination).await?;
+        storage.blocks.blocks[copied.location().block].add_used_bytes(copied.total_size());
 
         // finalize metadata object
-        meta_writer.finalize(&mut storage.medium).await?;
+        let meta_info = meta_writer.finalize(&mut storage.medium).await?;
+        storage.blocks.blocks[meta_info.location().block].add_used_bytes(meta_info.total_size());
+
         // delete old metadata object
         meta.delete(&mut storage.medium).await?;
         // delete old object
@@ -970,7 +973,10 @@ impl ObjectMover for MetaObject {
         [(); M::BLOCK_COUNT]:,
     {
         log::trace!("{self:?}::move_object");
-        object.move_object(&mut storage.medium, destination).await
+        let info = object.move_object(&mut storage.medium, destination).await?;
+        storage.blocks.blocks[destination.block].add_used_bytes(info.total_size());
+
+        Ok(info)
     }
 }
 
