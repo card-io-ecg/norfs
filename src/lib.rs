@@ -4,13 +4,15 @@
 #![feature(generic_const_exprs)] // Eww
 #![allow(incomplete_features)]
 
+use core::fmt::Debug;
+
 use crate::{
     diag::Counters,
     ll::{
-        blocks::{BlockHeaderKind, BlockInfo, BlockOps, BlockType},
+        blocks::{BlockHeaderKind, BlockInfo, BlockOps, BlockType, IndexedBlockInfo},
         objects::{
-            MetadataObjectHeader, ObjectHeader, ObjectIterator, ObjectLocation, ObjectReader,
-            ObjectState, ObjectType, ObjectWriter,
+            MetadataObjectHeader, ObjectHeader, ObjectInfo, ObjectIterator, ObjectLocation,
+            ObjectReader, ObjectState, ObjectType, ObjectWriter,
         },
     },
     medium::{StorageMedium, StoragePrivate},
@@ -61,34 +63,126 @@ where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,
 {
-    fn find_alloc_block(&self, ty: BlockType, min_free: usize) -> Result<usize, StorageError> {
-        log::trace!("Storage::find_alloc_block({ty:?}, {min_free})");
+    async fn allocate_new_object(
+        &mut self,
+        ty: BlockType,
+        min_free: usize,
+        medium: &mut M,
+    ) -> Result<ObjectLocation, StorageError> {
+        self.allocate_object(ty, min_free, false, medium).await
+    }
+
+    fn all_blocks(&self) -> impl Iterator<Item = IndexedBlockInfo<M>> + '_ {
+        self.blocks
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(idx, info)| IndexedBlockInfo(idx, info))
+    }
+
+    fn blocks(&self, ty: BlockType) -> impl Iterator<Item = IndexedBlockInfo<M>> + '_ {
+        self.all_blocks().filter(move |info| info.is_type(ty))
+    }
+
+    fn allocate_object_impl(
+        &self,
+        ty: BlockType,
+        min_free: usize,
+        allow_gc_block: bool,
+    ) -> Result<usize, StorageError> {
+        log::trace!("Storage::allocate_object({ty:?}, {min_free}, {allow_gc_block:?})");
 
         // Try to find a used block with enough free space
-        if let Some(block) = self.blocks.iter().position(|info| {
-            info.header.kind() == BlockHeaderKind::Known(ty)
-                && !info.is_empty()
-                && info.free_space() >= min_free
-        }) {
-            return Ok(block);
+        if let Some(block) = self
+            .blocks(ty)
+            .find(|info| !info.is_empty() && info.free_space() >= min_free)
+        {
+            return Ok(block.0);
+        }
+        if let Some(block) = self.blocks(ty).find(|info| info.free_space() >= min_free) {
+            return Ok(block.0);
         }
 
-        // Pick a free block. Prioritize lesser used blocks.
-        if let Some((block, _)) = self
-            .blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, info)| {
-                info.header.kind() == BlockHeaderKind::Known(BlockType::Undefined)
-                    && info.free_space() >= min_free
-            })
-            .min_by_key(|(_, info)| info.header.erase_count())
-        {
-            return Ok(block);
+        // We reserve 2 blocks for GC.
+        if allow_gc_block || self.blocks(BlockType::Undefined).count() > 2 {
+            // Pick a free block. Prioritize lesser used blocks.
+            if let Some(block) = self
+                .blocks(BlockType::Undefined)
+                .filter(|info| info.free_space() >= min_free)
+                .min_by_key(|info| info.erase_count())
+            {
+                return Ok(block.0);
+            }
         }
 
         // No block found
         Err(StorageError::InsufficientSpace)
+    }
+
+    async fn allocate_object(
+        &mut self,
+        ty: BlockType,
+        min_free: usize,
+        allow_gc_block: bool,
+        medium: &mut M,
+    ) -> Result<ObjectLocation, StorageError> {
+        let location = self
+            .allocate_object_impl(ty, min_free, allow_gc_block)
+            .map(|block| ObjectLocation {
+                block,
+                offset: self.blocks[block].used_bytes(),
+            })?;
+
+        if self.blocks[location.block].is_unassigned() {
+            log::debug!("Setting block {} to {ty:?}", location.block);
+            BlockOps::new(medium)
+                .set_block_type(location.block, ty)
+                .await?;
+            self.blocks[location.block].header.set_block_type(ty);
+        }
+
+        Ok(location)
+    }
+
+    pub(crate) async fn find_block_to_free(
+        &mut self,
+        medium: &mut M,
+    ) -> Result<Option<(IndexedBlockInfo<M>, usize)>, StorageError> {
+        let mut target_block = None::<(IndexedBlockInfo<M>, usize)>;
+
+        // Select block with enough freeable space and minimum erase counter
+        for info in self.all_blocks().filter(|block| !block.is_empty()) {
+            let freeable = info.calculate_freeable_space(medium).await?;
+
+            match target_block {
+                Some((idx, potential)) => {
+                    if freeable > potential
+                        || (potential == freeable && info.erase_count() < idx.erase_count())
+                    {
+                        target_block = Some((info, freeable));
+                    }
+                }
+
+                None => target_block = Some((info, freeable)),
+            }
+        }
+
+        Ok(target_block)
+    }
+
+    async fn format(&mut self, block_to_free: usize, medium: &mut M) -> Result<(), StorageError> {
+        BlockOps::new(medium).format_block(block_to_free).await?;
+        self.blocks[block_to_free].update_stats_after_erase();
+
+        Ok(())
+    }
+
+    async fn format_indexed(
+        &mut self,
+        block_to_free: IndexedBlockInfo<M>,
+        medium: &mut M,
+    ) -> Result<(), StorageError> {
+        self.format(block_to_free.0, medium).await
     }
 }
 
@@ -270,7 +364,7 @@ where
         let mut used_bytes = 0;
 
         for (block_idx, info) in self.blocks.blocks.iter().enumerate() {
-            match info.header.kind() {
+            match info.kind() {
                 BlockHeaderKind::Empty => {}
                 BlockHeaderKind::Known(BlockType::Undefined) | BlockHeaderKind::Unknown => {
                     used_bytes += info.used_bytes();
@@ -309,6 +403,9 @@ where
         if_exists: OnCollision,
     ) -> Result<(), StorageError> {
         log::debug!("Storage::store({path}, len = {})", data.len());
+
+        self.make_space_for(path.len(), data.len()).await?;
+
         let overwritten_location = self.lookup(path).await;
 
         let overwritten = match overwritten_location {
@@ -318,6 +415,10 @@ where
         };
 
         if overwritten.is_none() || if_exists == OnCollision::Overwrite {
+            if let Some(overwritten) = overwritten {
+                log::debug!("Overwriting location: {:?}", overwritten);
+            }
+
             self.create_new_file(path, data).await?;
 
             if let Some(location) = overwritten {
@@ -326,6 +427,7 @@ where
 
             Ok(())
         } else {
+            log::debug!("File already exists at path: {}", path);
             Err(StorageError::InvalidOperation)
         }
     }
@@ -366,17 +468,69 @@ where
         Ok(size)
     }
 
+    fn estimate_data_chunks(&self, mut len: usize) -> Result<usize, StorageError> {
+        let mut block_count = 0;
+
+        for (ty, skip) in [(BlockType::Data, 0), (BlockType::Undefined, 2)] {
+            for block in self.blocks.blocks(ty).skip(skip) {
+                let space = block.free_space();
+                if space > ObjectHeader::byte_count::<M>() {
+                    len = len.saturating_sub(space - ObjectHeader::byte_count::<M>());
+                    block_count += 1;
+
+                    if len == 0 {
+                        return Ok(block_count);
+                    }
+                }
+            }
+        }
+
+        Err(StorageError::InsufficientSpace)
+    }
+
+    async fn make_space_for(&mut self, path_len: usize, len: usize) -> Result<(), StorageError> {
+        let mut meta_allocated = false;
+        loop {
+            let blocks = match self.estimate_data_chunks(
+                M::align(len) + M::align(path_len) + M::align(ObjectHeader::byte_count::<M>()),
+            ) {
+                Ok(blocks) => blocks,
+                Err(StorageError::InsufficientSpace) => {
+                    DataObject.try_to_make_space(self).await?;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+
+            if meta_allocated {
+                // Hopefully, freeing space didn't free the metadata block. If it did, we'll
+                // exit with insufficient space error later.
+                break;
+            }
+
+            let meta_size =
+                ObjectHeader::byte_count::<M>() + 4 + (blocks + 1) * M::object_location_bytes();
+
+            match self
+                .blocks
+                .allocate_new_object(BlockType::Metadata, meta_size, &mut self.medium)
+                .await
+            {
+                Ok(_) => meta_allocated = true,
+                Err(StorageError::InsufficientSpace) => MetaObject.try_to_make_space(self).await?,
+                Err(e) => return Err(e),
+            }
+        }
+
+        log::trace!("Storage::make_space_for({len}) done");
+        Ok(())
+    }
+
     async fn lookup(&mut self, path: &str) -> Result<ObjectLocation, StorageError> {
         let path_hash = hash_path(path);
 
-        for block_idx in self
-            .blocks
-            .blocks
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, blk)| blk.is_metadata().then_some(idx))
-        {
-            let mut iter = ObjectIterator::new::<M>(block_idx);
+        for block in self.blocks.blocks(BlockType::Metadata) {
+            let mut iter = block.objects();
 
             'objs: while let Some(object) = iter.next(&mut self.medium).await? {
                 if object.state() != ObjectState::Finalized {
@@ -423,16 +577,21 @@ where
     async fn delete_file_at(&mut self, meta_location: ObjectLocation) -> Result<(), StorageError> {
         let mut metadata = meta_location.read_metadata(&mut self.medium).await?;
 
-        metadata
-            .object
-            .update_state(&mut self.medium, ObjectState::Deleted)
-            .await?;
+        debug_assert_ne!(metadata.object.state(), ObjectState::Free);
+
+        if let Some(filename_object) =
+            ObjectInfo::read(metadata.filename_location, &mut self.medium).await?
+        {
+            filename_object.delete(&mut self.medium).await?;
+        }
 
         while let Some(location) = metadata.next_object_location(&mut self.medium).await? {
             let mut header = ObjectHeader::read(location, &mut self.medium).await?;
-            header
-                .update_state(&mut self.medium, ObjectState::Deleted)
-                .await?;
+            if header.state() != ObjectState::Free {
+                header
+                    .update_state(&mut self.medium, ObjectState::Deleted)
+                    .await?;
+            }
         }
 
         metadata
@@ -466,20 +625,23 @@ where
     }
 
     async fn create_new_file(&mut self, path: &str, mut data: &[u8]) -> Result<(), StorageError> {
+        log::trace!("Storage::create_new_file({:?})", path);
+
         if path.contains(&['/', '\\'][..]) {
+            log::warn!("Path contains invalid characters");
             return Err(StorageError::InvalidOperation);
         }
 
         let path_hash = hash_path(path);
 
-        // filename + 1 data page
-        let est_page_count = 1 + 1; // TODO: guess the number of data pages needed
+        // filename + data objects
+        let est_page_count = 1 + self.estimate_data_chunks(data.len())?;
 
-        // this is mutable because we can fail mid-writing
+        // this is mutable because we can fail mid-writing. 4 bytes to store the path hash
         let mut file_meta_location = self
             .find_new_object_location(
                 BlockType::Metadata,
-                est_page_count * M::align(M::object_location_bytes()),
+                4 + est_page_count * M::object_location_bytes(),
             )
             .await?;
 
@@ -576,6 +738,37 @@ where
         Ok(())
     }
 
+    async fn find_metadata_of_object(
+        &mut self,
+        object: &ObjectInfo<M>,
+    ) -> Result<ObjectInfo<M>, StorageError> {
+        log::trace!("Storage::find_metadata_of_object({:?})", object.location());
+        for block in self.blocks.blocks(BlockType::Metadata) {
+            let mut objects = block.objects();
+            while let Some(meta_object) = objects.next(&mut self.medium).await? {
+                match meta_object.state() {
+                    ObjectState::Free => break,
+                    ObjectState::Allocated => break,
+                    ObjectState::Finalized => {}
+                    ObjectState::Deleted => continue,
+                }
+                let mut meta = meta_object.read_metadata(&mut self.medium).await?;
+                while let Some(loc) = meta.next_object_location(&mut self.medium).await? {
+                    if loc == object.location() {
+                        log::trace!(
+                            "Storage::find_metadata_of_object({:?}) -> {:?}",
+                            object.location(),
+                            meta_object.location()
+                        );
+                        return Ok(meta_object);
+                    }
+                }
+            }
+        }
+
+        Err(StorageError::NotFound)
+    }
+
     async fn find_new_object_location(
         &mut self,
         ty: BlockType,
@@ -584,25 +777,206 @@ where
         log::trace!("Storage::find_new_object_location({ty:?}, {len})");
 
         // find block with most free space
-        let block = self
+        let object_size = M::align(ObjectHeader::byte_count::<M>()) + len;
+        let location = self
             .blocks
-            .find_alloc_block(ty, M::align(ObjectHeader::byte_count::<M>()) + len)?;
-
-        if self.blocks.blocks[block].header.kind() == BlockHeaderKind::Known(BlockType::Undefined) {
-            BlockOps::new(&mut self.medium)
-                .set_block_type(block, ty)
-                .await?;
-            self.blocks.blocks[block].header.set_block_type(ty);
-        }
-
-        let location = ObjectLocation {
-            block,
-            offset: self.blocks.blocks[block].used_bytes(),
-        };
+            .allocate_new_object(ty, object_size, &mut self.medium)
+            .await?;
 
         log::trace!("Storage::find_new_object_location({ty:?}, {len}) -> {location:?}");
 
         Ok(location)
+    }
+}
+
+// Async functions can't be recursive. Splitting out implementation for each block type means
+// we can reuse code without recursion.
+trait ObjectMover: Debug {
+    const BLOCK_TYPE: BlockType;
+
+    async fn move_object<M>(
+        &mut self,
+        storage: &mut Storage<M>,
+        object: ObjectInfo<M>,
+        destination: ObjectLocation,
+    ) -> Result<ObjectInfo<M>, StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]:;
+
+    async fn try_to_make_space<M>(&mut self, storage: &mut Storage<M>) -> Result<(), StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]:,
+    {
+        log::debug!("{self:?}::try_to_make_space()");
+        let Some((block_to_free, freeable)) = storage.blocks
+            .find_block_to_free(&mut storage.medium)
+            .await?
+        else {
+            log::debug!("Could not find a block to free");
+            return Err(StorageError::InsufficientSpace);
+        };
+
+        if freeable != block_to_free.used_bytes() {
+            log::debug!("{self:?}::try_to_make_space(): Moving objects out of block to free");
+            // We need to move objects out of this block
+            let mut iter = block_to_free.objects();
+
+            while let Some(object) = iter.next(&mut storage.medium).await? {
+                match object.state() {
+                    ObjectState::Free | ObjectState::Deleted => continue,
+                    ObjectState::Allocated => {
+                        log::warn!("Encountered an allocated object");
+                        // TODO: retry in a different object
+                        return Err(StorageError::InsufficientSpace);
+                    }
+                    ObjectState::Finalized => {}
+                }
+
+                let copy_location = storage
+                    .blocks
+                    .allocate_object(
+                        Self::BLOCK_TYPE,
+                        object.total_size(),
+                        true,
+                        &mut storage.medium,
+                    )
+                    .await
+                    .map_err(|_| StorageError::InsufficientSpace)?;
+
+                self.move_object(storage, object, copy_location).await?;
+            }
+        }
+
+        storage
+            .blocks
+            .format_indexed(block_to_free, &mut storage.medium)
+            .await
+    }
+}
+
+#[derive(Debug)]
+struct DataObject;
+
+impl ObjectMover for DataObject {
+    const BLOCK_TYPE: BlockType = BlockType::Data;
+
+    async fn move_object<M>(
+        &mut self,
+        storage: &mut Storage<M>,
+        object: ObjectInfo<M>,
+        destination: ObjectLocation,
+    ) -> Result<ObjectInfo<M>, StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]:,
+    {
+        log::trace!("{self:?}::move_object");
+
+        let mut meta = storage.find_metadata_of_object(&object).await?;
+        let new_meta_location = match storage
+            .find_new_object_location(BlockType::Metadata, meta.total_size())
+            .await
+        {
+            Ok(loc) => loc,
+            Err(StorageError::InsufficientSpace) => {
+                MetaObject.try_to_make_space(storage).await?;
+                let new = storage
+                    .find_new_object_location(BlockType::Metadata, meta.total_size())
+                    .await?;
+                // Look up again in case it was moved
+                meta = storage.find_metadata_of_object(&object).await?;
+                new
+            }
+            Err(e) => return Err(e),
+        };
+
+        log::debug!(
+            "Moving data object {:?} to {destination:?}",
+            object.location()
+        );
+        log::debug!(
+            "Moving meta object {:?} to {new_meta_location:?}",
+            meta.location()
+        );
+
+        // copy metadata object while replacing current object location to new location
+        let mut meta_writer = ObjectWriter::allocate(
+            new_meta_location,
+            ObjectType::FileMetadata,
+            &mut storage.medium,
+        )
+        .await?;
+        let mut old_object_reader = meta.read_metadata(&mut storage.medium).await?;
+
+        // copy header
+        meta_writer
+            .write(
+                &mut storage.medium,
+                &old_object_reader.path_hash.to_le_bytes(),
+            )
+            .await?;
+        let (bytes, byte_count) = old_object_reader.filename_location.into_bytes::<M>();
+        meta_writer
+            .write(&mut storage.medium, &bytes[..byte_count])
+            .await?;
+
+        // copy object locations
+        while let Some(loc) = old_object_reader
+            .next_object_location(&mut storage.medium)
+            .await?
+        {
+            let location = if loc == object.location() {
+                destination
+            } else {
+                loc
+            };
+
+            let (bytes, byte_count) = location.into_bytes::<M>();
+            meta_writer
+                .write(&mut storage.medium, &bytes[..byte_count])
+                .await?;
+        }
+
+        // copy data object
+        let copied = object.copy_object(&mut storage.medium, destination).await?;
+        storage.blocks.blocks[copied.location().block].add_used_bytes(copied.total_size());
+
+        // finalize metadata object
+        let meta_info = meta_writer.finalize(&mut storage.medium).await?;
+        storage.blocks.blocks[meta_info.location().block].add_used_bytes(meta_info.total_size());
+
+        // delete old metadata object
+        meta.delete(&mut storage.medium).await?;
+        // delete old object
+        object.delete(&mut storage.medium).await?;
+
+        Ok(copied)
+    }
+}
+
+#[derive(Debug)]
+struct MetaObject;
+
+impl ObjectMover for MetaObject {
+    const BLOCK_TYPE: BlockType = BlockType::Metadata;
+
+    async fn move_object<M>(
+        &mut self,
+        storage: &mut Storage<M>,
+        object: ObjectInfo<M>,
+        destination: ObjectLocation,
+    ) -> Result<ObjectInfo<M>, StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]:,
+    {
+        log::trace!("{self:?}::move_object");
+        let info = object.move_object(&mut storage.medium, destination).await?;
+        storage.blocks.blocks[destination.block].add_used_bytes(info.total_size());
+
+        Ok(info)
     }
 }
 
@@ -638,7 +1012,7 @@ mod test {
         ram_nor_emulating::NorRamStorage,
     };
 
-    const LIPSUM: &[u8] = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Fusce in mi scelerisque, porttitor mi amet.";
+    const LIPSUM: &[u8] = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Fusce i";
 
     pub fn init_test() {
         _ = simple_logger::SimpleLogger::new()
@@ -837,15 +1211,15 @@ mod test {
 
             let mut reader = storage.read("foo").await.expect("Failed to open file");
 
-            let mut buf = [0u8; 100];
+            let mut buf = [0u8; 64];
 
             // Read in two chunks to test that the reader resumes with the current byte
             reader
-                .read(&mut storage, &mut buf[0..50])
+                .read(&mut storage, &mut buf[0..32])
                 .await
                 .expect("Failed to read file");
             reader
-                .read(&mut storage, &mut buf[50..])
+                .read(&mut storage, &mut buf[32..])
                 .await
                 .expect("Failed to read file");
 
@@ -888,6 +1262,19 @@ mod test {
             assert_file_contents(&mut storage, "foo", b"bar").await;
             assert_file_contents(&mut storage, "baz", b"asdf").await;
         }
+
+        async fn can_reuse_space_of_deleted_files<M: StorageMedium>(
+            mut storage: Storage<M>,
+        ) {
+            for _ in 0..50 {
+                storage
+                    .store("foo", LIPSUM, OnCollision::Overwrite)
+                    .await
+                    .expect("Failed to create");
+
+                storage.delete("foo").await.expect("Failed to delete");
+            }
+        }
     }
 
     #[async_std::test]
@@ -908,7 +1295,7 @@ mod test {
                 .store("bar", LIPSUM, OnCollision::Overwrite)
                 .await
                 .is_err(),
-            "Lookup returned Ok unexpectedly"
+            "Store returned Ok unexpectedly"
         );
     }
 }

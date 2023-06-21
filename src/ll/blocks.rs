@@ -1,4 +1,7 @@
-use core::marker::PhantomData;
+use core::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{
     ll::objects::{ObjectIterator, ObjectState},
@@ -238,6 +241,7 @@ impl<M: StorageMedium> BlockInfo<M> {
 
     pub fn update_stats_after_erase(&mut self) {
         self.header.erase_count += 1;
+        self.header.header = BlockHeaderKind::Known(BlockType::Undefined);
         self.used_bytes = BlockHeader::<M>::byte_count();
         self.allow_alloc = true;
     }
@@ -260,6 +264,70 @@ impl<M: StorageMedium> BlockInfo<M> {
 
     pub fn used_bytes(&self) -> usize {
         self.used_bytes
+    }
+
+    pub fn kind(&self) -> BlockHeaderKind {
+        self.header.kind()
+    }
+
+    pub fn is_type(&self, ty: BlockType) -> bool {
+        self.header.kind() == BlockHeaderKind::Known(ty)
+    }
+
+    pub fn is_unassigned(&self) -> bool {
+        self.is_type(BlockType::Undefined)
+    }
+
+    pub fn erase_count(&self) -> u32 {
+        self.header.erase_count
+    }
+}
+
+pub struct IndexedBlockInfo<M: StorageMedium>(pub usize, pub BlockInfo<M>);
+
+impl<M: StorageMedium> Copy for IndexedBlockInfo<M> {}
+impl<M: StorageMedium> Clone for IndexedBlockInfo<M> {
+    fn clone(&self) -> Self {
+        Self(self.0, self.1)
+    }
+}
+
+impl<M: StorageMedium> IndexedBlockInfo<M> {
+    pub async fn calculate_freeable_space(&self, medium: &mut M) -> Result<usize, StorageError> {
+        let Self(block, _info) = self;
+
+        let mut iter = ObjectIterator::new::<M>(*block);
+
+        let mut deleted = 0;
+
+        while let Some(object) = iter.next(medium).await? {
+            match object.state() {
+                ObjectState::Allocated | ObjectState::Deleted => deleted += object.total_size(),
+                ObjectState::Free | ObjectState::Finalized => {}
+            }
+        }
+
+        let free_space = M::BLOCK_SIZE - iter.current_offset();
+
+        Ok(free_space + deleted)
+    }
+
+    pub fn objects(&self) -> ObjectIterator {
+        ObjectIterator::new::<M>(self.0)
+    }
+}
+
+impl<M: StorageMedium> Deref for IndexedBlockInfo<M> {
+    type Target = BlockInfo<M>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.1
+    }
+}
+
+impl<M: StorageMedium> DerefMut for IndexedBlockInfo<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.1
     }
 }
 
@@ -328,7 +396,7 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
         }
 
         if erase {
-            log::trace!("Erasing block {block}");
+            log::debug!("Erasing block {block}");
             self.medium.erase(block).await?;
         }
 

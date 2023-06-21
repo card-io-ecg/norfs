@@ -88,18 +88,20 @@ impl CompositeObjectState {
 
         if current_state > new_state {
             // Can't go backwards in state
+            log::error!("Can't change object state from {current_state:?} to {new_state:?}");
             return Err(StorageError::InvalidOperation);
         }
 
         if let Self::Allocated(ty, _) = self {
             // Can't change allocated object type
             if ty != object_type {
+                log::error!("Can't change object type from {ty:?} to {object_type:?}");
                 return Err(StorageError::InvalidOperation);
             }
         }
 
         let new_data_state = match new_state {
-            ObjectState::Free => return Err(StorageError::InvalidOperation),
+            ObjectState::Free => unreachable!(),
             ObjectState::Allocated => ObjectDataState::Untrusted,
             ObjectState::Finalized => ObjectDataState::Valid,
             ObjectState::Deleted => ObjectDataState::Deleted,
@@ -207,7 +209,10 @@ impl CompositeObjectState {
     fn object_type(self) -> Result<ObjectType, StorageError> {
         match self {
             Self::Allocated(ty, _) => Ok(ty),
-            Self::Free => Err(StorageError::InvalidOperation),
+            Self::Free => {
+                log::error!("Can't read object of type Free");
+                Err(StorageError::InvalidOperation)
+            }
         }
     }
 }
@@ -278,7 +283,7 @@ impl ObjectLocation {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ObjectHeader {
     state: CompositeObjectState,
     payload_size: usize, // At most block size - header
@@ -319,7 +324,7 @@ impl ObjectHeader {
         location: ObjectLocation,
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
-        log::trace!("ObjectHeader::allocate({location:?}, {object_type:?})",);
+        log::debug!("ObjectHeader::allocate({location:?}, {object_type:?})",);
 
         let state = CompositeObjectState::allocate(medium, location, object_type).await?;
 
@@ -433,7 +438,13 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
         log::trace!("MetadataObjectHeader::next_object_location()");
 
         let data_offset = 4 + M::object_location_bytes(); // path hash + filename location
-        if self.data_object_cursor >= self.object.payload_size - data_offset {
+        if self.data_object_cursor
+            >= self
+                .object
+                .payload_size::<M>()
+                .map(|size| size - data_offset)
+                .unwrap_or(0)
+        {
             return Ok(None);
         }
 
@@ -553,6 +564,11 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         if self.space() < data.len() {
+            log::debug!(
+                "Insufficient space ({}) to write data ({})",
+                self.space(),
+                data.len()
+            );
             return Err(StorageError::InsufficientSpace);
         }
 
@@ -603,6 +619,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
 
     pub async fn finalize(mut self, medium: &mut M) -> Result<ObjectInfo<M>, StorageError> {
         if self.object.state() != ObjectState::Allocated {
+            log::error!("Can not finalize object in state {:?}", self.object.state());
             return Err(StorageError::InvalidOperation);
         }
 
@@ -615,6 +632,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
 
     pub async fn delete(mut self, medium: &mut M) -> Result<(), StorageError> {
         if let ObjectState::Free | ObjectState::Deleted = self.object.state() {
+            log::error!("Can not delete object in state {:?}", self.object.state());
             return Ok(());
         }
 
@@ -649,6 +667,7 @@ impl<M: StorageMedium> ObjectReader<M> {
                 // We can read data from unfinalized/deleted objects if the caller allows it.
             } else {
                 // We can only read data from finalized objects.
+                log::error!("Trying to read {:?} object", object.state());
                 return Err(StorageError::FsCorrupted);
             }
         }
@@ -751,18 +770,59 @@ impl<M: StorageMedium> ObjectInfo<M> {
         })
     }
 
-    async fn read(location: ObjectLocation, medium: &mut M) -> Result<Option<Self>, StorageError> {
+    pub async fn read(
+        location: ObjectLocation,
+        medium: &mut M,
+    ) -> Result<Option<Self>, StorageError> {
         log::trace!("ObjectInfo::read({location:?})");
-        if location.offset + BlockHeader::<M>::byte_count() >= M::BLOCK_SIZE {
-            return Ok(None);
-        }
-
         let header = ObjectHeader::read(location, medium).await?;
+        log::trace!("ObjectInfo::read({location:?}) -> {header:?}");
+
         if header.state().is_free() {
             return Ok(None);
         }
 
         Ok(Some(Self::with_header(header)))
+    }
+
+    pub async fn copy_object(
+        &self,
+        medium: &mut M,
+        dst: ObjectLocation,
+    ) -> Result<ObjectInfo<M>, StorageError> {
+        let mut source = ObjectReader::new(self.location(), medium, false).await?;
+        let mut target = ObjectWriter::allocate(dst, self.header.object_type()?, medium).await?;
+
+        let mut buffer = [0; 16];
+        while source.remaining() > 0 {
+            let read_size = source.read(medium, &mut buffer).await?;
+            target.write(medium, &buffer[0..read_size]).await?;
+        }
+
+        target.finalize(medium).await
+    }
+
+    pub async fn move_object(
+        self,
+        medium: &mut M,
+        dst: ObjectLocation,
+    ) -> Result<ObjectInfo<M>, StorageError> {
+        let new = self.copy_object(medium, dst).await?;
+        self.delete(medium).await?;
+
+        Ok(new)
+    }
+
+    pub async fn finalize(mut self, medium: &mut M) -> Result<Self, StorageError> {
+        self.header
+            .update_state(medium, ObjectState::Finalized)
+            .await?;
+
+        Ok(self)
+    }
+
+    pub async fn delete(mut self, medium: &mut M) -> Result<(), StorageError> {
+        self.header.update_state(medium, ObjectState::Deleted).await
     }
 }
 
@@ -784,10 +844,15 @@ impl ObjectIterator {
         &mut self,
         medium: &mut M,
     ) -> Result<Option<ObjectInfo<M>>, StorageError> {
+        if self.location.offset + ObjectHeader::byte_count::<M>() >= M::BLOCK_SIZE {
+            return Ok(None);
+        }
+
         let info = ObjectInfo::read(self.location, medium).await?;
         if let Some(info) = info.as_ref() {
             self.location.offset += M::align(info.total_size());
         }
+
         Ok(info)
     }
 
