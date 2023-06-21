@@ -85,7 +85,7 @@ where
     T: Storable,
 {
     async fn write<M>(
-        &mut self,
+        &self,
         writer: &mut crate::writer::Writer<M>,
         storage: &mut crate::Storage<M>,
     ) -> Result<(), StorageError>

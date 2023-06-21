@@ -330,7 +330,7 @@ where
         struct DataWriter<'a>(&'a [u8]);
         impl FileDataWriter for DataWriter<'_> {
             async fn write<M>(
-                &mut self,
+                &self,
                 writer: &mut Writer<M>,
                 storage: &mut Storage<M>,
             ) -> Result<(), StorageError>
