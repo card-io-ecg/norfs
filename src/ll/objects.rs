@@ -609,6 +609,10 @@ impl<M: StorageMedium> ObjectWriter<M> {
         self.object.update_state(medium, state).await
     }
 
+    pub fn location(&self) -> ObjectLocation {
+        self.object.location
+    }
+
     pub fn payload_size(&self) -> usize {
         self.cursor + self.buffer.len()
     }
