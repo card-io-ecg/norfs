@@ -16,6 +16,7 @@ use crate::{
         },
     },
     medium::{StorageMedium, StoragePrivate},
+    read_dir::ReadDir,
     reader::Reader,
     writer::{FileDataWriter, Writer},
 };
@@ -26,6 +27,7 @@ pub mod fxhash;
 pub mod gc;
 pub mod ll;
 pub mod medium;
+pub mod read_dir;
 pub mod reader;
 pub mod writer;
 
@@ -52,6 +54,9 @@ pub enum StorageError {
 
     /// The end of file was reached.
     EndOfFile,
+
+    /// The input buffer is not large enough to hold the output.
+    InsufficientBuffer,
 }
 
 struct BlockInfoCollection<M>
@@ -413,6 +418,11 @@ where
         }
 
         Ok(size)
+    }
+
+    pub async fn read_dir(&mut self) -> Result<ReadDir<M>, StorageError> {
+        log::debug!("Storage::read_dir");
+        Ok(ReadDir::new(self))
     }
 
     fn estimate_data_chunks(&self, mut len: usize) -> Result<usize, StorageError> {
