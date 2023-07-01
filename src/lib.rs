@@ -1119,6 +1119,40 @@ mod test {
             assert_file_contents(&mut storage, "baz", b"asdf").await;
         }
 
+        async fn read_dir_returns_all_files_once<M: StorageMedium>(
+            mut storage: Storage<M>,
+        ) {
+            storage.store("foo", b"bar", OnCollision::Overwrite).await.expect("Create failed");
+            storage.store("baz", b"asdf", OnCollision::Overwrite).await.expect("Create failed");
+
+            let mut files = storage.read_dir().await.expect("Failed to list files");
+
+            let mut fn_buffer = [0u8; 32];
+            while let Some(file) = files.next(&mut storage).await.unwrap() {
+                match file.name(&mut storage, &mut fn_buffer).await.unwrap() {
+                    "foo" => assert_file_contents(&mut storage, "foo", b"bar").await,
+                    "baz" => assert_file_contents(&mut storage, "baz", b"asdf").await,
+                    _ => panic!("Unexpected file"),
+                }
+            }
+        }
+
+        async fn read_dir_can_delete_files<M: StorageMedium>(
+            mut storage: Storage<M>,
+        ) {
+            storage.store("foo", b"bar", OnCollision::Overwrite).await.expect("Create failed");
+            storage.store("baz", b"asdf", OnCollision::Overwrite).await.expect("Create failed");
+
+            let mut files = storage.read_dir().await.expect("Failed to list files");
+
+            while let Some(file) = files.next(&mut storage).await.unwrap() {
+                file.delete(&mut storage).await.unwrap();
+            }
+
+            assert!(!storage.exists("foo").await);
+            assert!(!storage.exists("bar").await);
+        }
+
         async fn can_reuse_space_of_deleted_files<M: StorageMedium>(
             mut storage: Storage<M>,
         ) {
