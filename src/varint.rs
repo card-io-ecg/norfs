@@ -10,33 +10,27 @@ use crate::{
 
 pub struct Varint(u64);
 
-impl From<u16> for Varint {
-    fn from(value: u16) -> Self {
-        Self(value as u64)
-    }
+macro_rules! varint {
+    ($ty:ty) => {
+        impl From<$ty> for Varint {
+            fn from(value: $ty) -> Self {
+                Self(value as u64)
+            }
+        }
+
+        impl TryFrom<Varint> for $ty {
+            type Error = LoadError;
+
+            fn try_from(value: Varint) -> Result<$ty, Self::Error> {
+                value.0.try_into().map_err(|_| LoadError::InvalidValue)
+            }
+        }
+    };
 }
 
-impl TryFrom<Varint> for u16 {
-    type Error = LoadError;
-
-    fn try_from(value: Varint) -> Result<u16, Self::Error> {
-        value.0.try_into().map_err(|_| LoadError::InvalidValue)
-    }
-}
-
-impl From<u32> for Varint {
-    fn from(value: u32) -> Self {
-        Self(value as u64)
-    }
-}
-
-impl TryFrom<Varint> for u32 {
-    type Error = LoadError;
-
-    fn try_from(value: Varint) -> Result<u32, Self::Error> {
-        value.0.try_into().map_err(|_| LoadError::InvalidValue)
-    }
-}
+varint!(u16);
+varint!(u32);
+varint!(usize);
 
 impl From<u64> for Varint {
     fn from(value: u64) -> Self {
@@ -45,24 +39,48 @@ impl From<u64> for Varint {
 }
 
 impl TryFrom<Varint> for u64 {
-    type Error = Infallible;
+    type Error = LoadError;
 
     fn try_from(value: Varint) -> Result<u64, Self::Error> {
         Ok(value.0)
     }
 }
 
-impl From<usize> for Varint {
-    fn from(value: usize) -> Self {
-        Self(value as u64)
+pub struct Svarint(i64);
+
+macro_rules! svarint {
+    ($ty:ty) => {
+        impl From<$ty> for Svarint {
+            fn from(value: $ty) -> Self {
+                Self(value as i64)
+            }
+        }
+
+        impl TryFrom<Svarint> for $ty {
+            type Error = LoadError;
+
+            fn try_from(value: Svarint) -> Result<$ty, Self::Error> {
+                value.0.try_into().map_err(|_| LoadError::InvalidValue)
+            }
+        }
+    };
+}
+
+svarint!(i16);
+svarint!(i32);
+svarint!(isize);
+
+impl From<i64> for Svarint {
+    fn from(value: i64) -> Self {
+        Self(value)
     }
 }
 
-impl TryFrom<Varint> for usize {
-    type Error = LoadError;
+impl TryFrom<Svarint> for i64 {
+    type Error = Infallible;
 
-    fn try_from(value: Varint) -> Result<usize, Self::Error> {
-        value.0.try_into().map_err(|_| LoadError::InvalidValue)
+    fn try_from(value: Svarint) -> Result<i64, Self::Error> {
+        Ok(value.0)
     }
 }
 
@@ -133,4 +151,34 @@ impl Storable for Varint {
 
         writer.write_all(&encoded[..]).await
     }
+}
+
+impl Loadable for Svarint {
+    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]: Sized,
+    {
+        Varint::load(reader).await.map(|v| Self(zigzag_decode(v.0)))
+    }
+}
+
+impl Storable for Svarint {
+    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]: Sized,
+    {
+        zigzag_encode(self.0).store(writer).await
+    }
+}
+
+#[inline]
+const fn zigzag_encode(val: i64) -> u64 {
+    ((val << 1) ^ (val >> ((core::mem::size_of::<u64>() - 1) * 8))) as u64
+}
+
+#[inline]
+const fn zigzag_decode(val: u64) -> i64 {
+    (val >> 1) as i64 ^ -((val & 1) as i64)
 }

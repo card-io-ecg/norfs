@@ -4,7 +4,7 @@ use crate::{
     medium::StorageMedium,
     reader::BoundReader,
     storable::{LoadError, Loadable, Storable},
-    varint::Varint,
+    varint::{Svarint, Varint},
     writer::BoundWriter,
     StorageError,
 };
@@ -56,6 +56,28 @@ impl Storable for u8 {
     }
 }
 
+impl Loadable for i8 {
+    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]: Sized,
+    {
+        let bytes = reader.read_array::<1>().await.map_err(LoadError::Io)?;
+        Ok(i8::from_le_bytes(bytes))
+    }
+}
+
+impl Storable for i8 {
+    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]: Sized,
+    {
+        let bytes = self.to_le_bytes();
+        writer.write_all(&bytes).await
+    }
+}
+
 impl Loadable for bool {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
     where
@@ -80,6 +102,11 @@ load_le_bytes!(u16 => Varint);
 load_le_bytes!(u32 => Varint);
 load_le_bytes!(u64 => Varint);
 load_le_bytes!(usize => Varint);
+
+load_le_bytes!(i16 => Svarint);
+load_le_bytes!(i32 => Svarint);
+load_le_bytes!(i64 => Svarint);
+load_le_bytes!(isize => Svarint);
 
 impl Loadable for char {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
