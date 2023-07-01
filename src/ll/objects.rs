@@ -870,7 +870,11 @@ impl ObjectIterator {
         Ok(info)
     }
 
-    pub fn current_offset(&self) -> usize {
+    pub(crate) fn current_offset(&self) -> usize {
         self.location.offset
+    }
+
+    pub(crate) fn block_idx(&self) -> usize {
+        self.location.block
     }
 }
