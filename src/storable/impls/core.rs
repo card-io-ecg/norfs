@@ -1,3 +1,5 @@
+use core::ffi::CStr;
+
 use crate::{
     medium::StorageMedium,
     reader::BoundReader,
@@ -184,5 +186,15 @@ impl Storable for &str {
         [(); M::BLOCK_COUNT]: Sized,
     {
         writer.write_all(self.as_bytes()).await
+    }
+}
+
+impl Storable for &CStr {
+    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]: Sized,
+    {
+        writer.write_all(self.to_bytes()).await
     }
 }
