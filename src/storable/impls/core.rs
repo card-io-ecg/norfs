@@ -9,7 +9,7 @@ use crate::{
     StorageError,
 };
 
-macro_rules! load_le_bytes {
+macro_rules! load_proxied {
     ($ty:ty => $proxy:ty) => {
         impl Loadable for $ty {
             async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
@@ -36,47 +36,39 @@ macro_rules! load_le_bytes {
     };
 }
 
-impl Loadable for u8 {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
-        reader.read_one().await.map_err(LoadError::Io)
-    }
+macro_rules! load_bytes {
+    ($ty:ty) => {
+        impl Loadable for $ty {
+            async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
+            where
+                M: StorageMedium,
+                [(); M::BLOCK_COUNT]: Sized,
+            {
+                let bytes = reader
+                    .read_array::<{ core::mem::size_of::<$ty>() }>()
+                    .await
+                    .map_err(LoadError::Io)?;
+                Ok(Self::from_le_bytes(bytes))
+            }
+        }
+
+        impl Storable for $ty {
+            async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
+            where
+                M: StorageMedium,
+                [(); M::BLOCK_COUNT]: Sized,
+            {
+                let bytes = self.to_le_bytes();
+                writer.write_all(&bytes).await
+            }
+        }
+    };
 }
 
-impl Storable for u8 {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
-        writer.write_all(&[*self]).await
-    }
-}
-
-impl Loadable for i8 {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
-        let bytes = reader.read_array::<1>().await.map_err(LoadError::Io)?;
-        Ok(i8::from_le_bytes(bytes))
-    }
-}
-
-impl Storable for i8 {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
-        let bytes = self.to_le_bytes();
-        writer.write_all(&bytes).await
-    }
-}
+load_bytes!(u8);
+load_bytes!(i8);
+load_bytes!(f32);
+load_bytes!(f64);
 
 impl Loadable for bool {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
@@ -98,15 +90,15 @@ impl Storable for bool {
     }
 }
 
-load_le_bytes!(u16 => Varint);
-load_le_bytes!(u32 => Varint);
-load_le_bytes!(u64 => Varint);
-load_le_bytes!(usize => Varint);
+load_proxied!(u16 => Varint);
+load_proxied!(u32 => Varint);
+load_proxied!(u64 => Varint);
+load_proxied!(usize => Varint);
 
-load_le_bytes!(i16 => Svarint);
-load_le_bytes!(i32 => Svarint);
-load_le_bytes!(i64 => Svarint);
-load_le_bytes!(isize => Svarint);
+load_proxied!(i16 => Svarint);
+load_proxied!(i32 => Svarint);
+load_proxied!(i64 => Svarint);
+load_proxied!(isize => Svarint);
 
 impl Loadable for char {
     async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
