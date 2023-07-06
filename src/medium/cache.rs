@@ -240,3 +240,33 @@ impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> StorageMedium
         Ok(())
     }
 }
+
+impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> StorageMedium
+    for &mut ReadCache<M, SIZE, PAGES>
+{
+    const BLOCK_SIZE: usize = M::BLOCK_SIZE;
+    const BLOCK_COUNT: usize = M::BLOCK_COUNT;
+    const WRITE_GRANULARITY: WriteGranularity = M::WRITE_GRANULARITY;
+
+    async fn erase(&mut self, block: usize) -> Result<(), StorageError> {
+        ReadCache::erase(self, block).await
+    }
+
+    async fn read(
+        &mut self,
+        block: usize,
+        offset: usize,
+        data: &mut [u8],
+    ) -> Result<(), StorageError> {
+        ReadCache::read(self, block, offset, data).await
+    }
+
+    async fn write(
+        &mut self,
+        block: usize,
+        offset: usize,
+        data: &[u8],
+    ) -> Result<(), StorageError> {
+        ReadCache::write(self, block, offset, data).await
+    }
+}
