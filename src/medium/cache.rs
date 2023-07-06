@@ -86,7 +86,7 @@ struct CachePages<const SIZE: usize, const COUNT: usize> {
 impl<const SIZE: usize, const COUNT: usize> CachePages<SIZE, COUNT> {
     const COUNT_AT_LEAST_1: () = assert!(COUNT > 0);
 
-    fn new() -> Self {
+    const fn new() -> Self {
         #[allow(clippy::let_unit_value)]
         let _ = Self::COUNT_AT_LEAST_1;
 
@@ -156,7 +156,7 @@ pub struct ReadCache<M: StorageMedium, const SIZE: usize, const PAGES: usize> {
 }
 
 impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> ReadCache<M, SIZE, PAGES> {
-    pub fn new(medium: M) -> Self {
+    pub const fn new(medium: M) -> Self {
         Self {
             medium,
             cache: CachePages::new(),
