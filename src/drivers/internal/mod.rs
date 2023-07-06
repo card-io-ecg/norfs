@@ -31,7 +31,7 @@ pub struct InternalDriver<P: InternalPartition> {
 }
 
 impl<P: InternalPartition> InternalDriver<P> {
-    pub fn new(partition: P) -> Self {
+    pub const fn new(partition: P) -> Self {
         Self {
             unlocked: false,
             _partition: partition,
