@@ -2,6 +2,7 @@
 #![feature(async_fn_in_trait)]
 #![feature(impl_trait_projections)]
 #![feature(generic_const_exprs)] // Eww
+#![feature(maybe_uninit_uninit_array, maybe_uninit_array_assume_init)]
 #![allow(incomplete_features)]
 
 use core::fmt::Debug;
@@ -29,10 +30,12 @@ pub mod ll;
 pub mod medium;
 pub mod read_dir;
 pub mod reader;
+pub mod storable;
+pub mod varint;
 pub mod writer;
 
 /// Error values returned by storage operations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageError {
     /// The file does not exist.
     NotFound,
@@ -57,6 +60,12 @@ pub enum StorageError {
 
     /// The input buffer is not large enough to hold the output.
     InsufficientBuffer,
+}
+
+impl embedded_io::Error for StorageError {
+    fn kind(&self) -> embedded_io::ErrorKind {
+        embedded_io::ErrorKind::Other
+    }
 }
 
 struct BlockInfoCollection<M>
@@ -321,7 +330,7 @@ where
         struct DataWriter<'a>(&'a [u8]);
         impl FileDataWriter for DataWriter<'_> {
             async fn write<M>(
-                &mut self,
+                &self,
                 writer: &mut Writer<M>,
                 storage: &mut Storage<M>,
             ) -> Result<(), StorageError>
@@ -337,7 +346,7 @@ where
             }
         }
 
-        self.store_writer(path, DataWriter(data), if_exists).await
+        self.store_writer(path, &DataWriter(data), if_exists).await
     }
 
     /// Creates a new file at `path` with the given `data`.
@@ -348,7 +357,7 @@ where
     pub async fn store_writer(
         &mut self,
         path: &str,
-        data: impl FileDataWriter,
+        data: &impl FileDataWriter,
         if_exists: OnCollision,
     ) -> Result<(), StorageError> {
         log::debug!(
@@ -377,7 +386,7 @@ where
         }
 
         // TODO: reuse filename object
-        self.create_new_file(path, data).await?;
+        Writer::create(path, self, data).await?;
 
         if let Some(location) = overwritten {
             self.delete_file_at(location).await?;
@@ -581,14 +590,6 @@ where
             .await
     }
 
-    async fn create_new_file(
-        &mut self,
-        path: &str,
-        data: impl FileDataWriter,
-    ) -> Result<(), StorageError> {
-        Writer::create(path, self, data).await
-    }
-
     async fn find_metadata_of_object(
         &mut self,
         object: &ObjectInfo<M>,
@@ -661,7 +662,8 @@ trait ObjectMover: Debug {
         [(); M::BLOCK_COUNT]:,
     {
         log::debug!("{self:?}::try_to_make_space()");
-        let Some((block_to_free, freeable)) = storage.blocks
+        let Some((block_to_free, freeable)) = storage
+            .blocks
             .find_block_to_free(&mut storage.medium)
             .await?
         else {
@@ -878,28 +880,28 @@ mod test {
         println!();
     }
 
-    async fn create_default_fs() -> Storage<NorRamStorage<256, 32>> {
+    pub(crate) async fn create_default_fs() -> Storage<NorRamStorage<256, 32>> {
         let medium = NorRamStorage::<256, 32>::new();
         Storage::format_and_mount(medium)
             .await
             .expect("Failed to mount storage")
     }
 
-    async fn create_larger_fs() -> Storage<NorRamStorage<1024, 256>> {
+    pub(crate) async fn create_larger_fs() -> Storage<NorRamStorage<1024, 256>> {
         let medium = NorRamStorage::<1024, 256>::new();
         Storage::format_and_mount(medium)
             .await
             .expect("Failed to mount storage")
     }
 
-    async fn create_aligned_fs() -> Storage<AlignedNorRamStorage<1024, 256>> {
+    pub(crate) async fn create_aligned_fs() -> Storage<AlignedNorRamStorage<1024, 256>> {
         let medium = AlignedNorRamStorage::<1024, 256>::new();
         Storage::format_and_mount(medium)
             .await
             .expect("Failed to mount storage")
     }
 
-    async fn create_aligned_fs_with_read_cache(
+    pub(crate) async fn create_aligned_fs_with_read_cache(
     ) -> Storage<ReadCache<AlignedNorRamStorage<1024, 256>, 256, 2>> {
         let medium = ReadCache::new(AlignedNorRamStorage::<1024, 256>::new());
         Storage::format_and_mount(medium)
@@ -907,7 +909,7 @@ mod test {
             .expect("Failed to mount storage")
     }
 
-    async fn create_word_granularity_fs<const GRANULARITY: usize>(
+    pub(crate) async fn create_word_granularity_fs<const GRANULARITY: usize>(
     ) -> Storage<RamStorage<512, 64, GRANULARITY>>
     where
         [(); RamStorage::<512, 64, GRANULARITY>::BLOCK_COUNT]:,
@@ -918,7 +920,7 @@ mod test {
             .expect("Failed to mount storage")
     }
 
-    async fn assert_file_contents<M: StorageMedium>(
+    pub(crate) async fn assert_file_contents<M: StorageMedium>(
         storage: &mut Storage<M>,
         path: &str,
         expected: &[u8],
@@ -945,6 +947,7 @@ mod test {
         assert_eq!(contents, expected);
     }
 
+    #[macro_export]
     macro_rules! test_cases {
         (
             $(async fn $test_name:ident<M: StorageMedium>(mut $storage:ident: Storage<M> $(,)?) $code:tt)+
@@ -959,20 +962,20 @@ mod test {
                         $code
                     }
 
-                    init_test();
+                    crate::test::init_test();
 
                     log::info!("Running test case with create_default_fs");
-                    test_case_impl(create_default_fs().await).await;
+                    test_case_impl(crate::test::create_default_fs().await).await;
                     log::info!("Running test case with create_larger_fs");
-                    test_case_impl(create_larger_fs().await).await;
+                    test_case_impl(crate::test::create_larger_fs().await).await;
                     log::info!("Running test case with create_word_granularity_fs::<1>");
-                    test_case_impl(create_word_granularity_fs::<1>().await).await;
+                    test_case_impl(crate::test::create_word_granularity_fs::<1>().await).await;
                     log::info!("Running test case with create_word_granularity_fs::<4>");
-                    test_case_impl(create_word_granularity_fs::<4>().await).await;
+                    test_case_impl(crate::test::create_word_granularity_fs::<4>().await).await;
                     log::info!("Running test case with create_aligned_fs");
-                    test_case_impl(create_aligned_fs().await).await;
+                    test_case_impl(crate::test::create_aligned_fs().await).await;
                     log::info!("Running test case with create_aligned_fs_with_read_cache");
-                    test_case_impl(create_aligned_fs_with_read_cache().await).await;
+                    test_case_impl(crate::test::create_aligned_fs_with_read_cache().await).await;
                 }
             )+
         };

@@ -1,6 +1,9 @@
+use embedded_io::blocking::ReadExactError;
+
 use crate::{
     ll::objects::{MetadataObjectHeader, ObjectReader},
     medium::StorageMedium,
+    storable::{LoadError, Loadable},
     Storage, StorageError,
 };
 
@@ -107,5 +110,73 @@ where
         let buf = self.read_array::<1>(storage).await?;
 
         Ok(buf[0])
+    }
+
+    pub async fn read_loadable<'a, T: Loadable>(
+        &'a mut self,
+        storage: &'a mut Storage<M>,
+    ) -> Result<T, LoadError<StorageError>> {
+        T::load(&mut BoundReader {
+            reader: self,
+            storage,
+        })
+        .await
+    }
+}
+
+pub struct BoundReader<'a, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    reader: &'a mut Reader<M>,
+    storage: &'a mut Storage<M>,
+}
+
+impl<'a, M> BoundReader<'a, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize, StorageError> {
+        self.reader.read(self.storage, buf).await
+    }
+
+    pub async fn read_all(&mut self, buf: &mut [u8]) -> Result<(), StorageError> {
+        self.reader.read_all(self.storage, buf).await
+    }
+
+    pub async fn read_one(&mut self) -> Result<u8, StorageError> {
+        self.reader.read_one(self.storage).await
+    }
+
+    pub async fn read_array<const N: usize>(&mut self) -> Result<[u8; N], StorageError> {
+        self.reader.read_array(self.storage).await
+    }
+}
+
+impl<M> embedded_io::Io for BoundReader<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    type Error = StorageError;
+}
+
+impl<M> embedded_io::asynch::Read for BoundReader<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        Reader::read(self.reader, self.storage, buf).await
+    }
+
+    async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ReadExactError<Self::Error>> {
+        match Reader::read_all(self.reader, self.storage, buf).await {
+            Ok(_) => Ok(()),
+            Err(StorageError::EndOfFile) => Err(ReadExactError::UnexpectedEof),
+            Err(e) => Err(ReadExactError::Other(e)),
+        }
     }
 }

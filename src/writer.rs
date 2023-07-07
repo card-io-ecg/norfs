@@ -10,7 +10,7 @@ use crate::{
 
 pub trait FileDataWriter {
     async fn write<M>(
-        &mut self,
+        &self,
         writer: &mut Writer<M>,
         storage: &mut Storage<M>,
     ) -> Result<(), StorageError>
@@ -160,7 +160,7 @@ where
     pub async fn create(
         path: &str,
         storage: &mut Storage<M>,
-        mut op: impl FileDataWriter,
+        op: &impl FileDataWriter,
     ) -> Result<(), StorageError> {
         log::debug!("Writer::create(path = {:?})", path);
 
@@ -224,5 +224,61 @@ where
         storage.blocks.blocks[finalized.location().block].add_used_bytes(finalized.total_size());
 
         Ok(())
+    }
+
+    pub fn bind<'a>(&'a mut self, storage: &'a mut Storage<M>) -> BoundWriter<'a, M>
+    where
+        M: StorageMedium,
+        [(); M::BLOCK_COUNT]:,
+    {
+        BoundWriter {
+            writer: self,
+            storage,
+        }
+    }
+}
+
+pub struct BoundWriter<'a, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    writer: &'a mut Writer<M>,
+    storage: &'a mut Storage<M>,
+}
+
+impl<M> BoundWriter<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    pub async fn write(&mut self, buf: &[u8]) -> Result<usize, StorageError> {
+        self.writer.write(buf, self.storage).await
+    }
+
+    pub async fn write_all(&mut self, buf: &[u8]) -> Result<(), StorageError> {
+        self.writer.write_all(buf, self.storage).await
+    }
+}
+
+impl<M> embedded_io::Io for BoundWriter<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    type Error = StorageError;
+}
+
+impl<M> embedded_io::asynch::Write for BoundWriter<'_, M>
+where
+    M: StorageMedium,
+    [(); M::BLOCK_COUNT]:,
+{
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        BoundWriter::write(self, buf).await
+    }
+
+    async fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        BoundWriter::write_all(self, buf).await
     }
 }
