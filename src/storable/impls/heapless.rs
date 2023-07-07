@@ -1,20 +1,11 @@
-use crate::{
-    medium::StorageMedium,
-    reader::BoundReader,
-    storable::{LoadError, Loadable, Storable},
-    writer::BoundWriter,
-    StorageError,
-};
+use crate::storable::{LoadError, Loadable, Storable};
+use embedded_io::asynch::{Read, Write};
 
 impl<T, const N: usize> Loadable for heapless::Vec<T, N>
 where
     T: Loadable,
 {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let count = usize::load(reader).await?;
 
         let mut vec = heapless::Vec::new();
@@ -32,11 +23,7 @@ impl<T, const N: usize> Storable for heapless::Vec<T, N>
 where
     T: Storable,
 {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         self.len().store(writer).await?;
 
         for item in self.iter() {
@@ -48,11 +35,7 @@ where
 }
 
 impl<const N: usize> Loadable for heapless::String<N> {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let count = usize::load(reader).await?;
 
         let mut string = heapless::String::new();
@@ -74,11 +57,7 @@ impl<const N: usize> Loadable for heapless::String<N> {
 }
 
 impl<const N: usize> Storable for heapless::String<N> {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         self.len().store(writer).await?;
 
         writer.write_all(self.as_bytes()).await

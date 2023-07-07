@@ -1,22 +1,14 @@
 use core::mem::MaybeUninit;
 
-use crate::{
-    medium::StorageMedium,
-    reader::BoundReader,
-    storable::{LoadError, Loadable, Storable},
-    writer::BoundWriter,
-    StorageError,
-};
+use embedded_io::asynch::{Read, Write};
+
+use crate::storable::{LoadError, Loadable, Storable};
 
 impl<T, const N: usize> Loadable for [T; N]
 where
     T: Loadable,
 {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let mut array = MaybeUninit::uninit_array::<N>();
 
         for idx in 0..N {
@@ -31,11 +23,7 @@ impl<T, const N: usize> Storable for [T; N]
 where
     T: Storable,
 {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         for item in self.iter() {
             item.store(writer).await?;
         }

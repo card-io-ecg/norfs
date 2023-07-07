@@ -62,7 +62,6 @@ pub enum StorageError {
     InsufficientBuffer,
 }
 
-#[cfg(feature = "embedded-io")]
 impl embedded_io::Error for StorageError {
     fn kind(&self) -> embedded_io::ErrorKind {
         embedded_io::ErrorKind::Other
@@ -663,7 +662,8 @@ trait ObjectMover: Debug {
         [(); M::BLOCK_COUNT]:,
     {
         log::debug!("{self:?}::try_to_make_space()");
-        let Some((block_to_free, freeable)) = storage.blocks
+        let Some((block_to_free, freeable)) = storage
+            .blocks
             .find_block_to_free(&mut storage.medium)
             .await?
         else {

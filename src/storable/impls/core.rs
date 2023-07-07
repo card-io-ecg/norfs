@@ -1,22 +1,16 @@
 use core::ffi::CStr;
 
+use embedded_io::asynch::{Read, Write};
+
 use crate::{
-    medium::StorageMedium,
-    reader::BoundReader,
     storable::{LoadError, Loadable, Storable},
     varint::{Svarint, Varint},
-    writer::BoundWriter,
-    StorageError,
 };
 
 macro_rules! load_proxied {
     ($ty:ty => $proxy:ty) => {
         impl Loadable for $ty {
-            async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-            where
-                M: StorageMedium,
-                [(); M::BLOCK_COUNT]: Sized,
-            {
+            async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
                 let proxy = <$proxy>::load(reader).await?;
                 let value = <$ty>::try_from(proxy)?;
                 Ok(value)
@@ -24,11 +18,7 @@ macro_rules! load_proxied {
         }
 
         impl Storable for $ty {
-            async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-            where
-                M: StorageMedium,
-                [(); M::BLOCK_COUNT]: Sized,
-            {
+            async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
                 let proxy = <$proxy>::from(*self);
                 proxy.store(writer).await
             }
@@ -39,25 +29,15 @@ macro_rules! load_proxied {
 macro_rules! load_bytes {
     ($ty:ty) => {
         impl Loadable for $ty {
-            async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-            where
-                M: StorageMedium,
-                [(); M::BLOCK_COUNT]: Sized,
-            {
-                let bytes = reader
-                    .read_array::<{ core::mem::size_of::<$ty>() }>()
-                    .await
-                    .map_err(LoadError::Io)?;
+            async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
+                let mut bytes = [0; core::mem::size_of::<$ty>()];
+                reader.read_exact(&mut bytes).await?;
                 Ok(Self::from_le_bytes(bytes))
             }
         }
 
         impl Storable for $ty {
-            async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-            where
-                M: StorageMedium,
-                [(); M::BLOCK_COUNT]: Sized,
-            {
+            async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
                 let bytes = self.to_le_bytes();
                 writer.write_all(&bytes).await
             }
@@ -71,21 +51,13 @@ load_bytes!(f32);
 load_bytes!(f64);
 
 impl Loadable for bool {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         Ok(u8::load(reader).await? != 0)
     }
 }
 
 impl Storable for bool {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         (*self as u8).store(writer).await
     }
 }
@@ -101,17 +73,10 @@ load_proxied!(i64 => Svarint);
 load_proxied!(isize => Svarint);
 
 impl Loadable for char {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let mut array = [0; 4];
         let len = usize::load(reader).await?;
-        reader
-            .read_all(&mut array[..len])
-            .await
-            .map_err(LoadError::Io)?;
+        reader.read_exact(&mut array[..len]).await?;
 
         core::str::from_utf8(&array[..len])
             .map_err(|_| LoadError::InvalidValue)
@@ -120,11 +85,7 @@ impl Loadable for char {
 }
 
 impl Storable for char {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         let mut dst = [0; 4];
         let str = self.encode_utf8(&mut dst);
         writer.write_all(str.as_bytes()).await
@@ -132,11 +93,7 @@ impl Storable for char {
 }
 
 impl<T: Loadable> Loadable for Option<T> {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let value = if bool::load(reader).await? {
             Some(T::load(reader).await?)
         } else {
@@ -148,11 +105,7 @@ impl<T: Loadable> Loadable for Option<T> {
 }
 
 impl<T: Storable> Storable for Option<T> {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         match self {
             Some(value) => {
                 true.store(writer).await?;
@@ -164,11 +117,7 @@ impl<T: Storable> Storable for Option<T> {
 }
 
 impl<T: Loadable, E: Loadable> Loadable for Result<T, E> {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let value = if bool::load(reader).await? {
             Ok(T::load(reader).await?)
         } else {
@@ -180,11 +129,7 @@ impl<T: Loadable, E: Loadable> Loadable for Result<T, E> {
 }
 
 impl<T: Storable, E: Storable> Storable for Result<T, E> {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         match self {
             Ok(value) => {
                 true.store(writer).await?;
@@ -199,21 +144,13 @@ impl<T: Storable, E: Storable> Storable for Result<T, E> {
 }
 
 impl Storable for &str {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         writer.write_all(self.as_bytes()).await
     }
 }
 
 impl Storable for &CStr {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         writer.write_all(self.to_bytes()).await
     }
 }

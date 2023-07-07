@@ -2,37 +2,55 @@ pub mod impls;
 
 use core::convert::Infallible;
 
-use crate::{
-    medium::StorageMedium,
-    reader::BoundReader,
-    writer::{BoundWriter, FileDataWriter},
-    StorageError,
+use embedded_io::{
+    asynch::{Read, Write},
+    blocking::ReadExactError,
+    Error,
 };
 
+use crate::{medium::StorageMedium, writer::FileDataWriter, StorageError};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoadError {
+pub enum ConversionError {
     InvalidValue,
-    Io(StorageError),
 }
 
-impl From<Infallible> for LoadError {
-    fn from(x: Infallible) -> LoadError {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadError<E: Error> {
+    InvalidValue,
+    UnexpectedEof,
+    Io(E),
+}
+
+impl<E: Error> From<Infallible> for LoadError<E> {
+    fn from(x: Infallible) -> LoadError<E> {
         match x {}
     }
 }
 
+impl<E: Error> From<ConversionError> for LoadError<E> {
+    fn from(x: ConversionError) -> LoadError<E> {
+        match x {
+            ConversionError::InvalidValue => LoadError::InvalidValue,
+        }
+    }
+}
+
+impl<E: Error> From<ReadExactError<E>> for LoadError<E> {
+    fn from(value: ReadExactError<E>) -> Self {
+        match value {
+            ReadExactError::UnexpectedEof => LoadError::UnexpectedEof,
+            ReadExactError::Other(err) => LoadError::Io(err),
+        }
+    }
+}
+
 pub trait Loadable: Sized {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized;
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>>;
 }
 
 pub trait Storable: Sized {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized;
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error>;
 }
 
 impl<T> FileDataWriter for T
@@ -54,12 +72,11 @@ where
 
 #[cfg(test)]
 mod test {
+    use embedded_io::asynch::{Read, Write};
+
     use crate::{
-        reader::BoundReader,
         storable::{Loadable, Storable},
-        test_cases,
-        writer::BoundWriter,
-        OnCollision, Storage, StorageError, StorageMedium,
+        test_cases, OnCollision, Storage, StorageMedium,
     };
 
     use super::LoadError;
@@ -72,11 +89,7 @@ mod test {
     }
 
     impl Loadable for TestType {
-        async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-        where
-            M: StorageMedium,
-            [(); M::BLOCK_COUNT]: Sized,
-        {
+        async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
             let data = match u8::load(reader).await? {
                 0 => TestType::A {
                     foo: u8::load(reader).await?,
@@ -92,11 +105,7 @@ mod test {
     }
 
     impl Storable for TestType {
-        async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-        where
-            M: StorageMedium,
-            [(); M::BLOCK_COUNT]: Sized,
-        {
+        async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
             match self {
                 TestType::A { foo, bar } => {
                     0u8.store(writer).await?;

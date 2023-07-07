@@ -261,7 +261,6 @@ where
     }
 }
 
-#[cfg(feature = "embedded-io")]
 impl<M> embedded_io::Io for BoundWriter<'_, M>
 where
     M: StorageMedium,
@@ -270,7 +269,6 @@ where
     type Error = StorageError;
 }
 
-#[cfg(feature = "embedded-io")]
 impl<M> embedded_io::asynch::Write for BoundWriter<'_, M>
 where
     M: StorageMedium,

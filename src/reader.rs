@@ -112,10 +112,10 @@ where
         Ok(buf[0])
     }
 
-    pub async fn read_loadable<T: Loadable>(
-        &mut self,
-        storage: &mut Storage<M>,
-    ) -> Result<T, LoadError> {
+    pub async fn read_loadable<'a, T: Loadable>(
+        &'a mut self,
+        storage: &'a mut Storage<M>,
+    ) -> Result<T, LoadError<StorageError>> {
         T::load(&mut BoundReader {
             reader: self,
             storage,
@@ -155,7 +155,6 @@ where
     }
 }
 
-#[cfg(feature = "embedded-io")]
 impl<M> embedded_io::Io for BoundReader<'_, M>
 where
     M: StorageMedium,
@@ -164,7 +163,6 @@ where
     type Error = StorageError;
 }
 
-#[cfg(feature = "embedded-io")]
 impl<M> embedded_io::asynch::Read for BoundReader<'_, M>
 where
     M: StorageMedium,

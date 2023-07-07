@@ -1,12 +1,8 @@
 use core::convert::Infallible;
 
-use crate::{
-    medium::StorageMedium,
-    reader::BoundReader,
-    storable::{LoadError, Loadable, Storable},
-    writer::BoundWriter,
-    StorageError,
-};
+use embedded_io::asynch::{Read, Write};
+
+use crate::storable::{ConversionError, LoadError, Loadable, Storable};
 
 pub struct Varint(u64);
 
@@ -19,10 +15,13 @@ macro_rules! varint {
         }
 
         impl TryFrom<Varint> for $ty {
-            type Error = LoadError;
+            type Error = ConversionError;
 
             fn try_from(value: Varint) -> Result<$ty, Self::Error> {
-                value.0.try_into().map_err(|_| LoadError::InvalidValue)
+                value
+                    .0
+                    .try_into()
+                    .map_err(|_| ConversionError::InvalidValue)
             }
         }
     };
@@ -39,7 +38,7 @@ impl From<u64> for Varint {
 }
 
 impl TryFrom<Varint> for u64 {
-    type Error = LoadError;
+    type Error = ConversionError;
 
     fn try_from(value: Varint) -> Result<u64, Self::Error> {
         Ok(value.0)
@@ -57,10 +56,13 @@ macro_rules! svarint {
         }
 
         impl TryFrom<Svarint> for $ty {
-            type Error = LoadError;
+            type Error = ConversionError;
 
             fn try_from(value: Svarint) -> Result<$ty, Self::Error> {
-                value.0.try_into().map_err(|_| LoadError::InvalidValue)
+                value
+                    .0
+                    .try_into()
+                    .map_err(|_| ConversionError::InvalidValue)
             }
         }
     };
@@ -108,11 +110,7 @@ pub const fn max_of_last_byte<T: Sized>() -> u8 {
 }
 
 impl Loadable for Varint {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let mut out = 0;
         for i in 0..varint_bytes::<u64>() {
             let val = u8::load(reader).await?;
@@ -121,22 +119,18 @@ impl Loadable for Varint {
 
             if (val & 0x80) == 0 {
                 return if i == varint_bytes::<u64>() - 1 && val > max_of_last_byte::<u64>() {
-                    Err(LoadError::InvalidValue)
+                    Err(LoadError::from(ConversionError::InvalidValue))
                 } else {
                     Ok(Self(out))
                 };
             }
         }
-        Err(LoadError::InvalidValue)
+        Err(LoadError::from(ConversionError::InvalidValue))
     }
 }
 
 impl Storable for Varint {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         let mut value = self.0;
         let mut encoded = [0; varint_bytes::<u64>()];
         for i in 0..varint_bytes::<u64>() {
@@ -154,21 +148,13 @@ impl Storable for Varint {
 }
 
 impl Loadable for Svarint {
-    async fn load<M>(reader: &mut BoundReader<'_, M>) -> Result<Self, LoadError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         Varint::load(reader).await.map(|v| Self(zigzag_decode(v.0)))
     }
 }
 
 impl Storable for Svarint {
-    async fn store<M>(&self, writer: &mut BoundWriter<'_, M>) -> Result<(), StorageError>
-    where
-        M: StorageMedium,
-        [(); M::BLOCK_COUNT]: Sized,
-    {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         zigzag_encode(self.0).store(writer).await
     }
 }
