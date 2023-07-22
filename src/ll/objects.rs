@@ -12,6 +12,7 @@ use crate::{
 pub enum ObjectType {
     FileMetadata = 0x8F,
     FileData = 0x8E,
+    DirectoryMetadata = 0x8D,
 }
 
 impl ObjectType {
@@ -19,6 +20,7 @@ impl ObjectType {
         match byte {
             v if v == Self::FileMetadata as u8 => Some(Self::FileMetadata),
             v if v == Self::FileData as u8 => Some(Self::FileData),
+            v if v == Self::DirectoryMetadata as u8 => Some(Self::DirectoryMetadata),
             _ => None,
         }
     }
