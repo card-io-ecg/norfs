@@ -164,12 +164,14 @@ where
     ) -> Result<(), StorageError> {
         log::debug!("Writer::create(path = {:?})", path);
 
+        // TODO: lift this? we need to look up the directory
         if path.contains(&['/', '\\'][..]) {
             log::warn!("Path contains invalid characters");
             return Err(StorageError::InvalidOperation);
         }
 
         let path_hash = hash_path(path);
+        let directory_hash = hash_path(""); // TODO
         let est_page_count = 1 + storage.estimate_data_chunks(op.estimate_length())?;
 
         // this is mutable because we can fail mid-writing. 4 bytes to store the path hash
@@ -198,6 +200,9 @@ where
         .await?;
         meta_writer
             .write(&mut storage.medium, &path_hash.to_le_bytes())
+            .await?;
+        meta_writer
+            .write(&mut storage.medium, &directory_hash.to_le_bytes())
             .await?;
 
         storage

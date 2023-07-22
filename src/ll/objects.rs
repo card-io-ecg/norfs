@@ -433,9 +433,9 @@ impl ObjectHeader {
 pub struct MetadataObjectHeader<M: StorageMedium> {
     pub object: ObjectHeader,
     pub path_hash: u32,
+    pub directory_hash: u32,
     pub filename_location: ObjectLocation,
     data_object_cursor: usize, // Used to iterate through the list of object locations.
-    _parent: Option<ObjectLocation>,
     _medium: PhantomData<M>,
 }
 
@@ -446,7 +446,7 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
     ) -> Result<Option<ObjectLocation>, StorageError> {
         log::trace!("MetadataObjectHeader::next_object_location()");
 
-        let data_offset = 4 + M::object_location_bytes(); // path hash + filename location
+        let data_offset = 4 + 4 + M::object_location_bytes(); // path hash + folder hash + filename location
         if self.data_object_cursor
             >= self
                 .object
@@ -776,13 +776,23 @@ impl<M: StorageMedium> ObjectInfo<M> {
             )
             .await?;
 
+        let mut directory_hash_bytes = [0; 4];
+        let directory_hash_offset = path_hash_offset + 4;
+        medium
+            .read(
+                self.location().block,
+                directory_hash_offset,
+                &mut directory_hash_bytes,
+            )
+            .await?;
+
         let mut filename_location_bytes = [0; 8];
         let filename_location_bytes = &mut filename_location_bytes[0..M::object_location_bytes()];
 
         medium
             .read(
                 self.location().block,
-                path_hash_offset + 4,
+                directory_hash_offset + 4,
                 filename_location_bytes,
             )
             .await?;
@@ -790,9 +800,9 @@ impl<M: StorageMedium> ObjectInfo<M> {
         Ok(MetadataObjectHeader {
             object: self.header,
             path_hash: u32::from_le_bytes(path_hash_bytes),
+            directory_hash: u32::from_le_bytes(directory_hash_bytes),
             filename_location: ObjectLocation::from_bytes::<M>(filename_location_bytes),
             data_object_cursor: 0,
-            _parent: None,
             _medium: PhantomData,
         })
     }
