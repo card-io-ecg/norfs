@@ -475,7 +475,7 @@ where
             }
 
             let meta_size =
-                ObjectHeader::byte_count::<M>() + 4 + (blocks + 1) * M::object_location_bytes();
+                ObjectHeader::byte_count::<M>() + 8 + (blocks + 1) * M::object_location_bytes();
 
             match self
                 .blocks
@@ -768,6 +768,12 @@ impl ObjectMover for DataObject {
             .write(
                 &mut storage.medium,
                 &old_object_reader.path_hash.to_le_bytes(),
+            )
+            .await?;
+        meta_writer
+            .write(
+                &mut storage.medium,
+                &old_object_reader.directory_hash.to_le_bytes(),
             )
             .await?;
 
