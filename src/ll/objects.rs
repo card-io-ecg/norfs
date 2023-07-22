@@ -283,6 +283,10 @@ impl ObjectLocation {
     }
 }
 
+/// Filesystem object header.
+///
+/// Each object has a header which contains the object's state and type,
+/// and the size of the object's payload.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ObjectHeader {
     state: CompositeObjectState,
@@ -293,6 +297,10 @@ pub struct ObjectHeader {
 impl ObjectHeader {
     pub fn byte_count<M: StorageMedium>() -> usize {
         M::align(CompositeObjectState::byte_count::<M>()) + M::align(M::object_size_bytes())
+    }
+
+    pub fn payload_offset<M: StorageMedium>() -> usize {
+        M::align(CompositeObjectState::byte_count::<M>())
     }
 
     pub async fn read<M: StorageMedium>(
@@ -307,7 +315,7 @@ impl ObjectHeader {
         medium
             .read(
                 location.block,
-                location.offset + M::align(CompositeObjectState::byte_count::<M>()),
+                location.offset + Self::payload_offset::<M>(),
                 &mut object_size_bytes[0..M::object_size_bytes()],
             )
             .await?;
@@ -344,6 +352,7 @@ impl ObjectHeader {
     }
 
     pub fn unset_payload_size<M: StorageMedium>() -> usize {
+        // A number of 0xFF bytes that is the size of the object size field.
         (1 << (M::object_size_bytes() * 8)) - 1
     }
 
@@ -404,12 +413,10 @@ impl ObjectHeader {
         }
 
         let bytes = size.to_le_bytes();
-        let offset = M::align(CompositeObjectState::byte_count::<M>());
-
         medium
             .write(
                 self.location.block,
-                self.location.offset + offset,
+                self.location.offset + Self::payload_offset::<M>(),
                 &bytes[0..M::object_size_bytes()],
             )
             .await?;
