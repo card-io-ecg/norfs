@@ -335,6 +335,51 @@ impl ObjectLocation {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct ObjectPayloadSize {
+    payload_size: usize, // At most block size - header
+}
+
+impl ObjectPayloadSize {
+    pub fn unset<M: StorageMedium>() -> Self {
+        Self {
+            // A number of 0xFF bytes that is the size of the object size field.
+            payload_size: (1 << (M::object_size_bytes() * 8)) - 1,
+        }
+    }
+
+    pub fn payload_size_offset<M: StorageMedium>() -> usize {
+        M::align(CompositeObjectState::byte_count::<M>())
+    }
+
+    async fn read<M: StorageMedium>(
+        location: ObjectLocation,
+        medium: &mut M,
+    ) -> Result<Self, StorageError> {
+        let mut object_size_bytes = [0; 4];
+
+        medium
+            .read(
+                location.block,
+                location.offset + Self::payload_size_offset::<M>(),
+                &mut object_size_bytes[0..M::object_size_bytes()],
+            )
+            .await?;
+
+        Ok(Self {
+            payload_size: u32::from_le_bytes(object_size_bytes) as usize,
+        })
+    }
+
+    pub fn payload_size<M: StorageMedium>(&self) -> Option<usize> {
+        if *self == Self::unset::<M>() {
+            None
+        } else {
+            Some(self.payload_size)
+        }
+    }
+}
+
 /// Filesystem object header.
 ///
 /// Each object has a header which contains the object's state and type,
@@ -342,7 +387,7 @@ impl ObjectLocation {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ObjectHeader {
     state: CompositeObjectState,
-    payload_size: usize, // At most block size - header
+    payload_size: ObjectPayloadSize,
     pub location: ObjectLocation,
 }
 
@@ -355,30 +400,13 @@ impl ObjectHeader {
         M::align(CompositeObjectState::byte_count::<M>())
     }
 
-    async fn read_payload_size<M: StorageMedium>(
-        location: ObjectLocation,
-        medium: &mut M,
-    ) -> Result<usize, StorageError> {
-        let mut object_size_bytes = [0; 4];
-
-        medium
-            .read(
-                location.block,
-                location.offset + Self::payload_offset::<M>(),
-                &mut object_size_bytes[0..M::object_size_bytes()],
-            )
-            .await?;
-
-        Ok(u32::from_le_bytes(object_size_bytes) as usize)
-    }
-
     pub async fn read<M: StorageMedium>(
         location: ObjectLocation,
         medium: &mut M,
     ) -> Result<Self, StorageError> {
         log::trace!("ObjectHeader::read({location:?})");
         let state = CompositeObjectState::read(medium, location).await?;
-        let payload_size = Self::read_payload_size(location, medium).await?;
+        let payload_size = ObjectPayloadSize::read(location, medium).await?;
 
         Ok(Self {
             state,
@@ -398,7 +426,7 @@ impl ObjectHeader {
 
         Ok(Self {
             state,
-            payload_size: Self::unset_payload_size::<M>(),
+            payload_size: ObjectPayloadSize::unset::<M>(),
             location,
         })
     }
@@ -411,17 +439,12 @@ impl ObjectHeader {
         self.state.object_type()
     }
 
-    pub fn unset_payload_size<M: StorageMedium>() -> usize {
-        // A number of 0xFF bytes that is the size of the object size field.
-        (1 << (M::object_size_bytes() * 8)) - 1
+    pub fn payload_size<M: StorageMedium>(&self) -> Option<usize> {
+        self.payload_size.payload_size::<M>()
     }
 
-    pub fn payload_size<M: StorageMedium>(&self) -> Option<usize> {
-        if self.payload_size != Self::unset_payload_size::<M>() {
-            Some(self.payload_size)
-        } else {
-            None
-        }
+    pub fn payload_size_raw(&self) -> usize {
+        self.payload_size.payload_size
     }
 
     pub async fn update_state<M: StorageMedium>(
@@ -481,7 +504,7 @@ impl ObjectHeader {
             )
             .await?;
 
-        self.payload_size = size;
+        self.payload_size.payload_size = size;
 
         Ok(())
     }
@@ -776,7 +799,7 @@ impl<M: StorageMedium> ObjectReader<M> {
     }
 
     pub fn len(&self) -> usize {
-        self.object.payload_size
+        self.object.payload_size_raw()
     }
 
     pub fn is_empty(&self) -> bool {
