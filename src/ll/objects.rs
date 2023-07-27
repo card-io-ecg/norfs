@@ -443,10 +443,6 @@ impl ObjectHeader {
         self.payload_size.payload_size::<M>()
     }
 
-    pub fn payload_size_raw(&self) -> usize {
-        self.payload_size.payload_size
-    }
-
     pub async fn update_state<M: StorageMedium>(
         &mut self,
         medium: &mut M,
@@ -799,7 +795,7 @@ impl<M: StorageMedium> ObjectReader<M> {
     }
 
     pub fn len(&self) -> usize {
-        self.object.payload_size_raw()
+        self.object.payload_size::<M>().unwrap_or(0)
     }
 
     pub fn is_empty(&self) -> bool {
