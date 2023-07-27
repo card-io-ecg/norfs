@@ -53,6 +53,10 @@ impl ObjectType {
             _ => None,
         }
     }
+
+    fn byte_count() -> usize {
+        1
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -98,6 +102,13 @@ impl ObjectDataState {
             WriteGranularity::Word(w) if self == Self::Valid => (w, STATE_FLAG_SET_BYTE),
             WriteGranularity::Word(w) if self == Self::Deleted => (2 * w, STATE_FLAG_SET_BYTE),
             WriteGranularity::Word(_) => panic!("Can't write this value"),
+        }
+    }
+
+    fn byte_count<M: StorageMedium>() -> usize {
+        match M::WRITE_GRANULARITY {
+            WriteGranularity::Bit => 1,
+            WriteGranularity::Word(w) => 2 * w,
         }
     }
 }
@@ -153,10 +164,7 @@ impl CompositeObjectState {
     }
 
     fn byte_count<M: StorageMedium>() -> usize {
-        match M::WRITE_GRANULARITY {
-            WriteGranularity::Bit => 2,
-            WriteGranularity::Word(w) => 3 * w,
-        }
+        M::align(ObjectType::byte_count()) + M::align(ObjectDataState::byte_count::<M>())
     }
 
     pub async fn read<M: StorageMedium>(
