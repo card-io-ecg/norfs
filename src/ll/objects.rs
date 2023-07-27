@@ -355,13 +355,10 @@ impl ObjectHeader {
         M::align(CompositeObjectState::byte_count::<M>())
     }
 
-    pub async fn read<M: StorageMedium>(
+    async fn read_payload_size<M: StorageMedium>(
         location: ObjectLocation,
         medium: &mut M,
-    ) -> Result<Self, StorageError> {
-        log::trace!("ObjectHeader::read({location:?})");
-        let state = CompositeObjectState::read(medium, location).await?;
-
+    ) -> Result<usize, StorageError> {
         let mut object_size_bytes = [0; 4];
 
         medium
@@ -372,9 +369,20 @@ impl ObjectHeader {
             )
             .await?;
 
+        Ok(u32::from_le_bytes(object_size_bytes) as usize)
+    }
+
+    pub async fn read<M: StorageMedium>(
+        location: ObjectLocation,
+        medium: &mut M,
+    ) -> Result<Self, StorageError> {
+        log::trace!("ObjectHeader::read({location:?})");
+        let state = CompositeObjectState::read(medium, location).await?;
+        let payload_size = Self::read_payload_size(location, medium).await?;
+
         Ok(Self {
             state,
-            payload_size: u32::from_le_bytes(object_size_bytes) as usize,
+            payload_size,
             location,
         })
     }
