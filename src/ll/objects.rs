@@ -367,10 +367,12 @@ impl ObjectPayloadSize {
         }
     }
 
+    // TODO: this encodes that size follows the object state.
     pub fn payload_size_offset<M: StorageMedium>() -> usize {
         M::align(CompositeObjectState::byte_count::<M>())
     }
 
+    // TODO: we might want to pass in the offset directly
     async fn read<M: StorageMedium>(
         location: ObjectLocation,
         medium: &mut M,
@@ -397,6 +399,10 @@ impl ObjectPayloadSize {
             Some(self.payload_size)
         }
     }
+
+    pub fn byte_count<M: StorageMedium>() -> usize {
+        M::object_size_bytes()
+    }
 }
 
 /// Filesystem object header.
@@ -412,11 +418,13 @@ pub struct ObjectHeader {
 
 impl ObjectHeader {
     pub fn byte_count<M: StorageMedium>() -> usize {
-        M::align(CompositeObjectState::byte_count::<M>()) + M::align(M::object_size_bytes())
+        // We need to align both because they are written separately
+        M::align(CompositeObjectState::byte_count::<M>())
+            + M::align(ObjectPayloadSize::byte_count::<M>())
     }
 
     pub fn payload_offset<M: StorageMedium>() -> usize {
-        M::align(CompositeObjectState::byte_count::<M>())
+        ObjectPayloadSize::payload_size_offset::<M>()
     }
 
     pub async fn read<M: StorageMedium>(
