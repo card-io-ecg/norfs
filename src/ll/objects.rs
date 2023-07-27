@@ -560,6 +560,15 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
     }
 
+    async fn write_bytes(&mut self, medium: &mut M, buffer: &[u8]) -> Result<(), StorageError> {
+        medium
+            .write(self.object.location.block, self.data_write_offset(), buffer)
+            .await?;
+        self.cursor += buffer.len();
+
+        Ok(())
+    }
+
     async fn flush(&mut self, medium: &mut M) -> Result<(), StorageError> {
         // Buffering is not necessary if we can write arbitrary bits.
         if let WriteGranularity::Bit | WriteGranularity::Word(1) = M::WRITE_GRANULARITY {
@@ -567,13 +576,10 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         if !self.buffer.is_empty() {
-            let offset = self.data_write_offset();
-            medium
-                .write(self.object.location.block, offset, &self.buffer)
-                .await?;
-
-            self.cursor += self.buffer.len();
-            self.buffer.clear();
+            // FIXME: This copy is a bit unfortunate, but it's only 4 bytes. We should still
+            // probably refactor this to avoid the copy.
+            let buffer = core::mem::take(&mut self.buffer);
+            self.write_bytes(medium, &buffer).await?;
         }
 
         Ok(())
@@ -623,22 +629,13 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         let len = data.len();
+        let aligned_count = len - len % M::WRITE_GRANULARITY.width();
 
-        let remaining = len % M::WRITE_GRANULARITY.width();
-        let aligned_bytes = len - remaining;
-        medium
-            .write(
-                self.object.location.block,
-                self.data_write_offset(),
-                &data[0..aligned_bytes],
-            )
-            .await?;
+        let (aligned, remaining) = data.split_at(aligned_count);
+        self.write_bytes(medium, aligned).await?;
 
-        data = self.fill_buffer(&data[aligned_bytes..]);
-
+        data = self.fill_buffer(remaining);
         debug_assert!(data.is_empty());
-
-        self.cursor += aligned_bytes;
 
         Ok(())
     }
