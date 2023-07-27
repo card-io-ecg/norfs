@@ -461,23 +461,29 @@ pub struct MetadataObjectHeader<M: StorageMedium> {
 }
 
 impl<M: StorageMedium> MetadataObjectHeader<M> {
+    /// Returns the location of the next data object of the current file.
     pub async fn next_object_location(
         &mut self,
         medium: &mut M,
     ) -> Result<Option<ObjectLocation>, StorageError> {
         log::trace!("MetadataObjectHeader::next_object_location()");
 
-        let data_offset = 4 + M::object_location_bytes(); // path hash + filename location
-        if self.data_object_cursor
-            >= self
-                .object
-                .payload_size::<M>()
-                .map(|size| size - data_offset)
-                .unwrap_or(0)
-        {
-            return Ok(None);
-        }
+        let location = if !self.at_last_data_object() {
+            let location = self.read_location(medium).await?;
+            self.data_object_cursor += M::object_location_bytes();
+            Some(location)
+        } else {
+            None
+        };
 
+        Ok(location)
+    }
+
+    fn metadata_header_size() -> usize {
+        4 + M::object_location_bytes() // path hash + filename location
+    }
+
+    async fn read_location(&self, medium: &mut M) -> Result<ObjectLocation, StorageError> {
         let mut location_bytes = [0; 8];
         let location_bytes = &mut location_bytes[0..M::object_location_bytes()];
 
@@ -486,15 +492,22 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
                 self.location().block,
                 self.location().offset
                     + M::align(ObjectHeader::byte_count::<M>())
-                    + data_offset
+                    + Self::metadata_header_size()
                     + self.data_object_cursor,
                 location_bytes,
             )
             .await?;
 
-        self.data_object_cursor += location_bytes.len();
+        Ok(ObjectLocation::from_bytes::<M>(location_bytes))
+    }
 
-        Ok(Some(ObjectLocation::from_bytes::<M>(location_bytes)))
+    fn at_last_data_object(&self) -> bool {
+        self.data_object_cursor
+            >= self
+                .object
+                .payload_size::<M>()
+                .map(|size| size - Self::metadata_header_size())
+                .unwrap_or(0)
     }
 
     pub fn location(&self) -> ObjectLocation {
