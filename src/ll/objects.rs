@@ -203,18 +203,31 @@ impl CompositeObjectState {
         Ok(this)
     }
 
+    async fn update_state<M: StorageMedium>(
+        self,
+        medium: &mut M,
+        location: ObjectLocation,
+        object_type: ObjectType,
+        state: ObjectState,
+    ) -> Result<Self, StorageError> {
+        log::trace!(
+            "CompositeObjectState::update_state({location:?}, {object_type:?}) -> {state:?}"
+        );
+        let this = self.transition_state(state, object_type)?;
+
+        Self::write_object_data_state(medium, location, state).await?;
+
+        Ok(this)
+    }
+
     pub async fn finalize<M: StorageMedium>(
         self,
         medium: &mut M,
         location: ObjectLocation,
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
-        log::trace!("CompositeObjectState::finalize({location:?}, {object_type:?})");
-        let this = self.transition_state(ObjectState::Finalized, object_type)?;
-
-        Self::write_object_data_state(medium, location, ObjectState::Finalized).await?;
-
-        Ok(this)
+        self.update_state(medium, location, object_type, ObjectState::Finalized)
+            .await
     }
 
     pub async fn delete<M: StorageMedium>(
@@ -223,12 +236,8 @@ impl CompositeObjectState {
         location: ObjectLocation,
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
-        log::trace!("CompositeObjectState::delete({location:?}, {object_type:?})");
-        let this = self.transition_state(ObjectState::Deleted, object_type)?;
-
-        Self::write_object_data_state(medium, location, ObjectState::Deleted).await?;
-
-        Ok(this)
+        self.update_state(medium, location, object_type, ObjectState::Deleted)
+            .await
     }
 
     fn object_type(self) -> Result<ObjectType, StorageError> {
@@ -459,14 +468,9 @@ impl ObjectHeader {
         let object_type = self.object_type()?;
 
         self.state = match state {
-            ObjectState::Finalized => {
+            ObjectState::Finalized | ObjectState::Deleted => {
                 self.state
-                    .finalize(medium, self.location, object_type)
-                    .await?
-            }
-            ObjectState::Deleted => {
-                self.state
-                    .delete(medium, self.location, object_type)
+                    .update_state(medium, self.location, object_type, state)
                     .await?
             }
             ObjectState::Allocated => return Err(StorageError::InvalidOperation),
