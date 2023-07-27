@@ -292,36 +292,34 @@ pub struct ObjectLocation {
 }
 
 impl ObjectLocation {
-    pub fn into_bytes<M: StorageMedium>(self) -> ([u8; 8], usize) {
-        let block_bytes = self.block.to_le_bytes();
-        let offset_bytes = self.offset.to_le_bytes();
+    pub fn into_bytes<M: StorageMedium>(self) -> heapless::Vec<u8, 8> {
+        let mut bytes = heapless::Vec::<u8, 8>::new();
 
-        let byte_count = M::object_location_bytes();
+        bytes
+            .extend_from_slice(&self.block.to_le_bytes()[..M::block_count_bytes()])
+            .unwrap();
 
-        let mut bytes = [0u8; 8];
-        let (block_idx_byte_slice, offset_byte_slice) =
-            bytes[0..byte_count].split_at_mut(M::block_count_bytes());
+        bytes
+            .extend_from_slice(&self.offset.to_le_bytes()[..M::block_size_bytes()])
+            .unwrap();
 
-        block_idx_byte_slice.copy_from_slice(&block_bytes[0..block_idx_byte_slice.len()]);
-        offset_byte_slice.copy_from_slice(&offset_bytes[0..offset_byte_slice.len()]);
-
-        (bytes, byte_count)
+        bytes
     }
 
     fn from_bytes<M: StorageMedium>(bytes: &[u8]) -> Self {
+        fn u32_from_le_byte_slice(bytes: &[u8]) -> u32 {
+            let mut buf = [0u8; 4];
+            buf[0..bytes.len()].copy_from_slice(bytes);
+            u32::from_le_bytes(buf)
+        }
+
         debug_assert_eq!(bytes.len(), M::object_location_bytes());
 
         let (block_idx_byte_slice, offset_byte_slice) = bytes.split_at(M::block_count_bytes());
 
-        let mut block_bytes = [0u8; 4];
-        block_bytes[0..block_idx_byte_slice.len()].copy_from_slice(block_idx_byte_slice);
-
-        let mut offset_bytes = [0u8; 4];
-        offset_bytes[0..offset_byte_slice.len()].copy_from_slice(offset_byte_slice);
-
         Self {
-            block: u32::from_le_bytes(block_bytes) as usize,
-            offset: u32::from_le_bytes(offset_bytes) as usize,
+            block: u32_from_le_byte_slice(block_idx_byte_slice) as usize,
+            offset: u32_from_le_byte_slice(offset_byte_slice) as usize,
         }
     }
 

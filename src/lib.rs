@@ -584,10 +584,8 @@ where
         meta_writer: &mut ObjectWriter<M>,
         location: ObjectLocation,
     ) -> Result<(), StorageError> {
-        let (bytes, byte_count) = location.into_bytes::<M>();
-        meta_writer
-            .write(&mut self.medium, &bytes[..byte_count])
-            .await
+        let bytes = location.into_bytes::<M>();
+        meta_writer.write(&mut self.medium, &bytes).await
     }
 
     async fn find_metadata_of_object(
@@ -776,10 +774,8 @@ impl ObjectMover for DataObject {
         } else {
             old_object_reader.filename_location
         };
-        let (bytes, byte_count) = filename_location.into_bytes::<M>();
-        meta_writer
-            .write(&mut storage.medium, &bytes[..byte_count])
-            .await?;
+        let bytes = filename_location.into_bytes::<M>();
+        meta_writer.write(&mut storage.medium, &bytes).await?;
 
         // copy object locations
         while let Some(loc) = old_object_reader
@@ -791,10 +787,8 @@ impl ObjectMover for DataObject {
             } else {
                 loc
             };
-            let (bytes, byte_count) = location.into_bytes::<M>();
-            meta_writer
-                .write(&mut storage.medium, &bytes[..byte_count])
-                .await?;
+            let bytes = location.into_bytes::<M>();
+            meta_writer.write(&mut storage.medium, &bytes).await?;
         }
 
         // copy data object

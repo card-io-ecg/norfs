@@ -41,13 +41,9 @@ where
         storage: &mut Storage<M>,
         location: ObjectLocation,
     ) -> Result<(), StorageError> {
-        let (bytes, byte_count) = location.into_bytes::<M>();
+        let bytes = location.into_bytes::<M>();
 
-        match self
-            .metadata
-            .write(&mut storage.medium, &bytes[..byte_count])
-            .await
-        {
+        match self.metadata.write(&mut storage.medium, &bytes).await {
             Ok(()) => return Ok(()),
             Err(StorageError::InsufficientSpace) => {}
             Err(e) => return Err(e),
@@ -86,9 +82,7 @@ where
             .await?;
 
         // Append location
-        self.metadata
-            .write(&mut storage.medium, &bytes[..byte_count])
-            .await?;
+        self.metadata.write(&mut storage.medium, &bytes).await?;
 
         old_metadata.delete(&mut storage.medium).await?;
 
