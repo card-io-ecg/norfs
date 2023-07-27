@@ -560,7 +560,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
     }
 
-    async fn write_bytes(&mut self, medium: &mut M, buffer: &[u8]) -> Result<(), StorageError> {
+    async fn append_payload(&mut self, medium: &mut M, buffer: &[u8]) -> Result<(), StorageError> {
         medium
             .write(self.object.location.block, self.data_write_offset(), buffer)
             .await?;
@@ -579,7 +579,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
             // FIXME: This copy is a bit unfortunate, but it's only 4 bytes. We should still
             // probably refactor this to avoid the copy.
             let buffer = core::mem::take(&mut self.buffer);
-            self.write_bytes(medium, &buffer).await?;
+            self.append_payload(medium, &buffer).await?;
         }
 
         Ok(())
@@ -632,7 +632,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         let aligned_count = len - len % M::WRITE_GRANULARITY.width();
 
         let (aligned, remaining) = data.split_at(aligned_count);
-        self.write_bytes(medium, aligned).await?;
+        self.append_payload(medium, aligned).await?;
 
         data = self.fill_buffer(remaining);
         debug_assert!(data.is_empty());
@@ -640,7 +640,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         Ok(())
     }
 
-    async fn write_size(&mut self, medium: &mut M) -> Result<(), StorageError> {
+    async fn write_payload_size(&mut self, medium: &mut M) -> Result<(), StorageError> {
         self.flush(medium).await?;
         self.object.set_payload_size(medium, self.cursor).await
     }
@@ -668,7 +668,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         // must be two different writes for powerloss safety
-        self.write_size(medium).await?;
+        self.write_payload_size(medium).await?;
         self.set_state(medium, ObjectState::Finalized).await?;
 
         Ok(ObjectInfo::with_header(self.object))
@@ -681,7 +681,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         if self.object.state() == ObjectState::Allocated {
-            self.write_size(medium).await?;
+            self.write_payload_size(medium).await?;
         }
 
         self.set_state(medium, ObjectState::Deleted).await
