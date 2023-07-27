@@ -91,10 +91,12 @@ impl ObjectDataState {
 
     /// Converts the state into an `(offset, value)` pair.
     fn into_raw<M: StorageMedium>(self) -> (usize, u8) {
+        const STATE_FLAG_SET_BYTE: u8 = 0;
+
         match M::WRITE_GRANULARITY {
             WriteGranularity::Bit => (1, self as u8),
-            WriteGranularity::Word(w) if self == Self::Valid => (w, 0),
-            WriteGranularity::Word(w) if self == Self::Deleted => (2 * w, 0),
+            WriteGranularity::Word(w) if self == Self::Valid => (w, STATE_FLAG_SET_BYTE),
+            WriteGranularity::Word(w) if self == Self::Deleted => (2 * w, STATE_FLAG_SET_BYTE),
             WriteGranularity::Word(_) => panic!("Can't write this value"),
         }
     }
