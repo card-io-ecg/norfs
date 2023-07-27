@@ -1,3 +1,34 @@
+//! File system object management.
+//!
+//! Objects are the basic blocks of NorFS. Objects have a type, a state, and a payload.
+//! The object state is designed to be able to be updated atomically, so that a power loss
+//! during an update will not result in an irrecoverably corrupted object.
+//!
+//! Each object can be in one of the following states:
+//!
+//!  - Allocated: the object may have been partially written, but is not yet finalized.
+//!  - Finalized: the object's payload is complete and the header contains a valid payload size.
+//!  - Deleted: the object's header contains a valid payload size but it's contents should no longer
+//!    be read.
+//!
+//! The file system partitions physical blocks into multiple types:
+//!
+//!  - Metadata blocks contain metadata objects (currently, file metadata).
+//!  - Data blocks contain data objects and file name objects.
+//!
+//! This partitioning helps with file lookup, as the file system can skip over data blocks when
+//! searching for a file. The file system allocates objects linearly in their appropriate blocks.
+//! The file system does not reuse deleted objects, but instead allocates new objects in the next
+//! free location.
+//!
+//! A consistent file system should not contain allocated, but not finalized objects. This case is
+//! enforced by the garbage collector, but an unexpected power loss may still result a partially
+//! written object. These objects are always at the end of a physical block though, which means
+//! that they can be detected and ignored.
+//!
+//! Objects do not have a fixed location. The garbage collector is allowed to move any object
+//! if necessary.
+
 use core::marker::PhantomData;
 
 use crate::{
