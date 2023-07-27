@@ -57,6 +57,16 @@ impl ObjectDataState {
             }
         }
     }
+
+    /// Converts the state into an `(offset, value)` pair.
+    fn into_raw<M: StorageMedium>(self) -> (usize, u8) {
+        match M::WRITE_GRANULARITY {
+            WriteGranularity::Bit => (1, self as u8),
+            WriteGranularity::Word(w) if self == Self::Valid => (w, 0),
+            WriteGranularity::Word(w) if self == Self::Deleted => (2 * w, 0),
+            WriteGranularity::Word(_) => panic!("Can't write this value"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -79,7 +89,7 @@ impl From<CompositeObjectState> for ObjectState {
 }
 
 impl CompositeObjectState {
-    fn transition(
+    fn transition_state(
         self,
         new_state: ObjectState,
         object_type: ObjectType,
@@ -155,11 +165,9 @@ impl CompositeObjectState {
     ) -> Result<Self, StorageError> {
         log::trace!("CompositeObjectState::allocate({location:?}, {object_type:?})");
         let this = Self::read(medium, location).await?;
-        let this = this.transition(ObjectState::Allocated, object_type)?;
+        let this = this.transition_state(ObjectState::Allocated, object_type)?;
 
-        medium
-            .write(location.block, location.offset, &[object_type as u8])
-            .await?;
+        Self::write_object_type(medium, location, object_type).await?;
 
         Ok(this)
     }
@@ -171,16 +179,9 @@ impl CompositeObjectState {
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
         log::trace!("CompositeObjectState::finalize({location:?}, {object_type:?})");
-        let this = self.transition(ObjectState::Finalized, object_type)?;
+        let this = self.transition_state(ObjectState::Finalized, object_type)?;
 
-        let (offset, byte) = match M::WRITE_GRANULARITY {
-            WriteGranularity::Bit => (1, ObjectDataState::Valid as u8),
-            WriteGranularity::Word(w) => (w, 0),
-        };
-
-        medium
-            .write(location.block, location.offset + offset, &[byte])
-            .await?;
+        Self::write_object_data_state(medium, location, ObjectState::Finalized).await?;
 
         Ok(this)
     }
@@ -192,16 +193,9 @@ impl CompositeObjectState {
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
         log::trace!("CompositeObjectState::delete({location:?}, {object_type:?})");
-        let this = self.transition(ObjectState::Deleted, object_type)?;
+        let this = self.transition_state(ObjectState::Deleted, object_type)?;
 
-        let (offset, byte) = match M::WRITE_GRANULARITY {
-            WriteGranularity::Bit => (1, ObjectDataState::Deleted as u8),
-            WriteGranularity::Word(w) => (2 * w, 0),
-        };
-
-        medium
-            .write(location.block, location.offset + offset, &[byte])
-            .await?;
+        Self::write_object_data_state(medium, location, ObjectState::Deleted).await?;
 
         Ok(this)
     }
@@ -214,6 +208,35 @@ impl CompositeObjectState {
                 Err(StorageError::InvalidOperation)
             }
         }
+    }
+
+    async fn write_object_type<M: StorageMedium>(
+        medium: &mut M,
+        location: ObjectLocation,
+        object_type: ObjectType,
+    ) -> Result<(), StorageError> {
+        medium
+            .write(location.block, location.offset, &[object_type as u8])
+            .await
+    }
+
+    async fn write_object_data_state<M: StorageMedium>(
+        medium: &mut M,
+        location: ObjectLocation,
+        state: ObjectState,
+    ) -> Result<(), StorageError> {
+        let data_state = match state {
+            ObjectState::Free | ObjectState::Allocated => {
+                return Err(StorageError::InvalidOperation);
+            }
+            ObjectState::Finalized => ObjectDataState::Valid,
+            ObjectState::Deleted => ObjectDataState::Deleted,
+        };
+
+        let (offset, byte) = data_state.into_raw::<M>();
+        medium
+            .write(location.block, location.offset + offset, &[byte])
+            .await
     }
 }
 
