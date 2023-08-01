@@ -568,15 +568,6 @@ where
         Ok(())
     }
 
-    async fn write_file_data(
-        &mut self,
-        location: ObjectLocation,
-        data: &[u8],
-    ) -> Result<(), StorageError> {
-        self.write_object(location, ObjectType::FileData, data)
-            .await
-    }
-
     async fn write_object(
         &mut self,
         location: ObjectLocation,

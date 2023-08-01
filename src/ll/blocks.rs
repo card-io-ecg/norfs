@@ -121,11 +121,7 @@ impl<M: StorageMedium> core::fmt::Debug for BlockHeader<M> {
 
 impl<M: StorageMedium> Clone for BlockHeader<M> {
     fn clone(&self) -> Self {
-        Self {
-            header: self.header,
-            erase_count: self.erase_count,
-            _medium: self._medium,
-        }
+        *self
     }
 }
 
@@ -220,11 +216,7 @@ impl<M: StorageMedium> core::fmt::Debug for BlockInfo<M> {
 
 impl<M: StorageMedium> Clone for BlockInfo<M> {
     fn clone(&self) -> Self {
-        Self {
-            header: self.header,
-            used_bytes: self.used_bytes,
-            allow_alloc: self.allow_alloc,
-        }
+        *self
     }
 }
 
@@ -288,7 +280,7 @@ pub struct IndexedBlockInfo<M: StorageMedium>(pub usize, pub BlockInfo<M>);
 impl<M: StorageMedium> Copy for IndexedBlockInfo<M> {}
 impl<M: StorageMedium> Clone for IndexedBlockInfo<M> {
     fn clone(&self) -> Self {
-        Self(self.0, self.1)
+        *self
     }
 }
 
