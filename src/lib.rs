@@ -568,13 +568,23 @@ where
         Ok(())
     }
 
-    async fn write_object(
+    async fn write_file_data(
         &mut self,
         location: ObjectLocation,
         data: &[u8],
     ) -> Result<(), StorageError> {
+        self.write_object(location, ObjectType::FileData, data)
+            .await
+    }
+
+    async fn write_object(
+        &mut self,
+        location: ObjectLocation,
+        obj_ty: ObjectType,
+        data: &[u8],
+    ) -> Result<(), StorageError> {
         self.blocks.blocks[location.block].add_used_bytes(
-            ObjectWriter::write_to(location, ObjectType::FileData, &mut self.medium, data).await?,
+            ObjectWriter::write_to(location, obj_ty, &mut self.medium, data).await?,
         );
         Ok(())
     }
