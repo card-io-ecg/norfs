@@ -180,7 +180,7 @@ where
             .await?;
 
         storage
-            .write_object(filename_location, path.as_bytes())
+            .write_object(filename_location, ObjectType::FileName, path.as_bytes())
             .await?;
 
         // Write a non-finalized header obejct
