@@ -296,6 +296,7 @@ impl<M: StorageMedium> IndexedBlockInfo<M> {
             match object.state() {
                 ObjectState::Allocated | ObjectState::Deleted => deleted += object.total_size(),
                 ObjectState::Free | ObjectState::Finalized => {}
+                ObjectState::Corrupted => break,
             }
         }
 

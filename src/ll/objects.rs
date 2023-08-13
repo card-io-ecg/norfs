@@ -41,18 +41,21 @@ use crate::{
 // Do not use 0xFF as it is reserved for the free state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ObjectType {
+    Free = 0xFF,
     FileMetadata = 0x8F,
     FileData = 0x8E,
     FileName = 0x8D,
+    Unknown = 0x00,
 }
 
 impl ObjectType {
-    fn parse(byte: u8) -> Option<Self> {
+    fn parse(byte: u8) -> Self {
         match byte {
-            v if v == Self::FileMetadata as u8 => Some(Self::FileMetadata),
-            v if v == Self::FileData as u8 => Some(Self::FileData),
-            v if v == Self::FileName as u8 => Some(Self::FileName),
-            _ => None,
+            v if v == Self::FileMetadata as u8 => Self::FileMetadata,
+            v if v == Self::FileData as u8 => Self::FileData,
+            v if v == Self::FileName as u8 => Self::FileName,
+            0xFF => Self::Free,
+            _ => Self::Unknown,
         }
     }
 
@@ -66,31 +69,32 @@ pub enum ObjectDataState {
     Untrusted = 0xFF,
     Valid = 0xF0,
     Deleted = 0x00,
+    Unknown,
 }
 
 impl ObjectDataState {
-    fn parse(byte: u8) -> Result<Self, StorageError> {
+    fn parse(byte: u8) -> Self {
         match byte {
-            v if v == Self::Untrusted as u8 => Ok(Self::Untrusted),
-            v if v == Self::Valid as u8 => Ok(Self::Valid),
-            v if v == Self::Deleted as u8 => Ok(Self::Deleted),
+            v if v == Self::Untrusted as u8 => Self::Untrusted,
+            v if v == Self::Valid as u8 => Self::Valid,
+            v if v == Self::Deleted as u8 => Self::Deleted,
             _ => {
                 log::warn!("Unknown object data state: 0x{byte:02X}");
-                Err(StorageError::FsCorrupted)
+                Self::Unknown
             }
         }
     }
 
-    fn parse_pair(finalized_byte: u8, deleted_byte: u8) -> Result<Self, StorageError> {
+    fn parse_pair(finalized_byte: u8, deleted_byte: u8) -> Self {
         match (finalized_byte, deleted_byte) {
-            (0xFF, 0xFF) => Ok(Self::Untrusted),
-            (0x00, 0xFF) => Ok(Self::Valid),
-            (0x00, 0x00) => Ok(Self::Deleted),
+            (0xFF, 0xFF) => Self::Untrusted,
+            (0x00, 0xFF) => Self::Valid,
+            (0x00, 0x00) => Self::Deleted,
             _ => {
                 log::warn!(
                     "Unknown object data state: (0x{finalized_byte:02X}, 0x{deleted_byte:02X})"
                 );
-                Err(StorageError::FsCorrupted)
+                Self::Unknown
             }
         }
     }
@@ -129,6 +133,7 @@ impl From<CompositeObjectState> for ObjectState {
                 ObjectDataState::Untrusted => Self::Allocated,
                 ObjectDataState::Valid => Self::Finalized,
                 ObjectDataState::Deleted => Self::Deleted,
+                ObjectDataState::Unknown => Self::Corrupted,
             },
         }
     }
@@ -157,7 +162,9 @@ impl CompositeObjectState {
         }
 
         let new_data_state = match new_state {
-            ObjectState::Free => unreachable!(),
+            ObjectState::Free | ObjectState::Corrupted => {
+                unreachable!()
+            }
             ObjectState::Allocated => ObjectDataState::Untrusted,
             ObjectState::Finalized => ObjectDataState::Valid,
             ObjectState::Deleted => ObjectDataState::Deleted,
@@ -183,20 +190,16 @@ impl CompositeObjectState {
         medium.read(location.block, location.offset, buffer).await?;
 
         match ObjectType::parse(buffer[0]) {
-            Some(ty) => {
+            ObjectType::Free => Ok(Self::Free),
+            ty => {
                 let data_state = match M::WRITE_GRANULARITY {
-                    WriteGranularity::Bit => ObjectDataState::parse(buffer[1])?,
+                    WriteGranularity::Bit => ObjectDataState::parse(buffer[1]),
                     WriteGranularity::Word(w) => {
-                        ObjectDataState::parse_pair(buffer[w], buffer[2 * w])?
+                        ObjectDataState::parse_pair(buffer[w], buffer[2 * w])
                     }
                 };
 
                 Ok(Self::Allocated(ty, data_state))
-            }
-            None if buffer[0] == 0xFF => Ok(Self::Free),
-            None => {
-                log::warn!("Unknown object type: 0x{:02X}", buffer[0]);
-                Err(StorageError::FsCorrupted)
             }
         }
     }
@@ -298,6 +301,7 @@ pub enum ObjectState {
     Allocated,
     Finalized,
     Deleted,
+    Corrupted,
 }
 
 impl ObjectState {
@@ -477,8 +481,6 @@ impl ObjectHeader {
         medium: &mut M,
         state: ObjectState,
     ) -> Result<(), StorageError> {
-        debug_assert!(!state.is_free());
-
         log::trace!("ObjectHeader::update_state({:?}, {state:?})", self.location);
 
         if state == self.state.into() {
@@ -493,8 +495,9 @@ impl ObjectHeader {
                     .update_state(medium, self.location, object_type, state)
                     .await?
             }
-            ObjectState::Allocated => return Err(StorageError::InvalidOperation),
-            ObjectState::Free => unreachable!(),
+            ObjectState::Free | ObjectState::Corrupted | ObjectState::Allocated => {
+                return Err(StorageError::InvalidOperation);
+            }
         };
 
         Ok(())
