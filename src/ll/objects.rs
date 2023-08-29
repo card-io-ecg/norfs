@@ -32,14 +32,16 @@
 use core::marker::PhantomData;
 
 use crate::{
+    debug, error,
     ll::blocks::BlockHeader,
     medium::{StorageMedium, StoragePrivate, WriteGranularity},
-    StorageError,
+    trace, warn, StorageError,
 };
 
 // Add new ones so that ANDing two variant together results in an invalid bit pattern.
 // Do not use 0xFF as it is reserved for the free state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ObjectType {
     FileMetadata = 0x8F,
     FileData = 0x8E,
@@ -62,6 +64,7 @@ impl ObjectType {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ObjectDataState {
     Untrusted = 0xFF,
     Valid = 0xF0,
@@ -75,7 +78,7 @@ impl ObjectDataState {
             v if v == Self::Valid as u8 => Ok(Self::Valid),
             v if v == Self::Deleted as u8 => Ok(Self::Deleted),
             _ => {
-                log::warn!("Unknown object data state: 0x{byte:02X}");
+                warn!("Unknown object data state: {:02X}", byte);
                 Err(StorageError::FsCorrupted)
             }
         }
@@ -87,8 +90,9 @@ impl ObjectDataState {
             (0x00, 0xFF) => Ok(Self::Valid),
             (0x00, 0x00) => Ok(Self::Deleted),
             _ => {
-                log::warn!(
-                    "Unknown object data state: (0x{finalized_byte:02X}, 0x{deleted_byte:02X})"
+                warn!(
+                    "Unknown object data state: ({:02X}, {:02X})",
+                    finalized_byte, deleted_byte
                 );
                 Err(StorageError::FsCorrupted)
             }
@@ -116,6 +120,7 @@ impl ObjectDataState {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum CompositeObjectState {
     Free,
     Allocated(ObjectType, ObjectDataState),
@@ -144,14 +149,20 @@ impl CompositeObjectState {
 
         if current_state > new_state {
             // Can't go backwards in state
-            log::error!("Can't change object state from {current_state:?} to {new_state:?}");
+            error!(
+                "Can't change object state from {:?} to {:?}",
+                current_state, new_state
+            );
             return Err(StorageError::InvalidOperation);
         }
 
         if let Self::Allocated(ty, _) = self {
             // Can't change allocated object type
             if ty != object_type {
-                log::error!("Can't change object type from {ty:?} to {object_type:?}");
+                error!(
+                    "Can't change object type from {:?} to {:?}",
+                    ty, object_type
+                );
                 return Err(StorageError::InvalidOperation);
             }
         }
@@ -173,7 +184,7 @@ impl CompositeObjectState {
         medium: &mut M,
         location: ObjectLocation,
     ) -> Result<Self, StorageError> {
-        log::trace!("CompositeObjectState::read({location:?})");
+        trace!("CompositeObjectState::read({:?})", location);
         let bytes_read = Self::byte_count::<M>();
 
         let mut buffer = [0; 12];
@@ -195,7 +206,7 @@ impl CompositeObjectState {
             }
             None if buffer[0] == 0xFF => Ok(Self::Free),
             None => {
-                log::warn!("Unknown object type: 0x{:02X}", buffer[0]);
+                warn!("Unknown object type: {:02X}", buffer[0]);
                 Err(StorageError::FsCorrupted)
             }
         }
@@ -206,7 +217,11 @@ impl CompositeObjectState {
         location: ObjectLocation,
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
-        log::trace!("CompositeObjectState::allocate({location:?}, {object_type:?})");
+        trace!(
+            "CompositeObjectState::allocate({:?}, {:?})",
+            location,
+            object_type
+        );
         let this = Self::read(medium, location).await?;
         let this = this.transition_state(ObjectState::Allocated, object_type)?;
 
@@ -222,8 +237,11 @@ impl CompositeObjectState {
         object_type: ObjectType,
         state: ObjectState,
     ) -> Result<Self, StorageError> {
-        log::trace!(
-            "CompositeObjectState::update_state({location:?}, {object_type:?}) -> {state:?}"
+        trace!(
+            "CompositeObjectState::update_state({:?}, {:?}) -> {:?}",
+            location,
+            object_type,
+            state
         );
         let this = self.transition_state(state, object_type)?;
 
@@ -256,7 +274,7 @@ impl CompositeObjectState {
         match self {
             Self::Allocated(ty, _) => Ok(ty),
             Self::Free => {
-                log::error!("Can't read object of type Free");
+                error!("Can't read object of type Free");
                 Err(StorageError::InvalidOperation)
             }
         }
@@ -293,6 +311,7 @@ impl CompositeObjectState {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ObjectState {
     Free,
     Allocated,
@@ -307,6 +326,7 @@ impl ObjectState {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ObjectLocation {
     pub block: usize,
     pub offset: usize,
@@ -357,6 +377,7 @@ impl ObjectLocation {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 struct ObjectPayloadSize {
     payload_size: usize, // At most block size - header
 }
@@ -412,6 +433,7 @@ impl ObjectPayloadSize {
 /// Each object has a header which contains the object's state and type,
 /// and the size of the object's payload.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ObjectHeader {
     state: CompositeObjectState,
     payload_size: ObjectPayloadSize,
@@ -433,7 +455,7 @@ impl ObjectHeader {
         location: ObjectLocation,
         medium: &mut M,
     ) -> Result<Self, StorageError> {
-        log::trace!("ObjectHeader::read({location:?})");
+        trace!("ObjectHeader::read({:?})", location);
         let state = CompositeObjectState::read(medium, location).await?;
         let payload_size = ObjectPayloadSize::read(location, medium).await?;
 
@@ -449,7 +471,7 @@ impl ObjectHeader {
         location: ObjectLocation,
         object_type: ObjectType,
     ) -> Result<Self, StorageError> {
-        log::debug!("ObjectHeader::allocate({location:?}, {object_type:?})",);
+        debug!("ObjectHeader::allocate({:?}, {:?})", location, object_type);
 
         let state = CompositeObjectState::allocate(medium, location, object_type).await?;
 
@@ -479,7 +501,11 @@ impl ObjectHeader {
     ) -> Result<(), StorageError> {
         debug_assert!(!state.is_free());
 
-        log::trace!("ObjectHeader::update_state({:?}, {state:?})", self.location);
+        trace!(
+            "ObjectHeader::update_state({:?}, {:?})",
+            self.location,
+            state
+        );
 
         if state == self.state.into() {
             return Ok(());
@@ -505,13 +531,14 @@ impl ObjectHeader {
         medium: &mut M,
         size: usize,
     ) -> Result<(), StorageError> {
-        log::trace!(
-            "ObjectHeader::set_payload_size({:?}, {size})",
-            self.location
+        trace!(
+            "ObjectHeader::set_payload_size({:?}, {})",
+            self.location,
+            size
         );
 
         if self.payload_size::<M>().is_some() {
-            log::warn!("payload size already set");
+            warn!("payload size already set");
             return Err(StorageError::InvalidOperation);
         }
 
@@ -546,7 +573,7 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
         &mut self,
         medium: &mut M,
     ) -> Result<Option<ObjectLocation>, StorageError> {
-        log::trace!("MetadataObjectHeader::next_object_location()");
+        trace!("MetadataObjectHeader::next_object_location()");
 
         let location = if !self.at_last_data_object() {
             let location = self.read_location(medium).await?;
@@ -693,7 +720,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         }
 
         if self.space() < data.len() {
-            log::debug!(
+            debug!(
                 "Insufficient space ({}) to write data ({})",
                 self.space(),
                 data.len()
@@ -743,7 +770,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
 
     pub async fn finalize(mut self, medium: &mut M) -> Result<ObjectInfo<M>, StorageError> {
         if self.object.state() != ObjectState::Allocated {
-            log::error!("Can not finalize object in state {:?}", self.object.state());
+            error!("Can not finalize object in state {:?}", self.object.state());
             return Err(StorageError::InvalidOperation);
         }
 
@@ -756,7 +783,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
 
     pub async fn delete(mut self, medium: &mut M) -> Result<(), StorageError> {
         if let ObjectState::Free | ObjectState::Deleted = self.object.state() {
-            log::error!("Can not delete object in state {:?}", self.object.state());
+            error!("Can not delete object in state {:?}", self.object.state());
             return Ok(());
         }
 
@@ -795,7 +822,7 @@ impl<M: StorageMedium> ObjectReader<M> {
         medium: &mut M,
         allow_non_finalized: bool,
     ) -> Result<Self, StorageError> {
-        log::trace!("ObjectReader::new({location:?})");
+        trace!("ObjectReader::new({:?})", location);
 
         // We read back the header to ensure that the object is in a valid state.
         let object = ObjectHeader::read(location, medium).await?;
@@ -805,7 +832,7 @@ impl<M: StorageMedium> ObjectReader<M> {
                 // We can read data from unfinalized/deleted objects if the caller allows it.
             } else {
                 // We can only read data from finalized objects.
-                log::error!("Trying to read {:?} object", object.state());
+                error!("Trying to read {:?} object", object.state());
                 return Err(StorageError::FsCorrupted);
             }
         }
@@ -912,9 +939,9 @@ impl<M: StorageMedium> ObjectInfo<M> {
         location: ObjectLocation,
         medium: &mut M,
     ) -> Result<Option<Self>, StorageError> {
-        log::trace!("ObjectInfo::read({location:?})");
+        trace!("ObjectInfo::read({:?})", location);
         let header = ObjectHeader::read(location, medium).await?;
-        log::trace!("ObjectInfo::read({location:?}) -> {header:?}");
+        trace!("ObjectInfo::read({:?}) -> {:?}", location, header);
 
         if header.state().is_free() {
             return Ok(None);

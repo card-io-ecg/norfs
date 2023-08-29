@@ -4,6 +4,7 @@ use core::{
 };
 
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct FxHasher {
     hash: u32,
 }

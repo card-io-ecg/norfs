@@ -4,12 +4,14 @@ use core::{
 };
 
 use crate::{
+    debug,
     ll::objects::{ObjectIterator, ObjectState},
     medium::{StorageMedium, StoragePrivate, WriteGranularity},
-    StorageError,
+    trace, StorageError,
 };
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum BlockType {
     Metadata = 0x55,
     Data = 0xAA,
@@ -18,6 +20,7 @@ pub enum BlockType {
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum BlockHeaderKind {
     Empty,
     Unknown,
@@ -119,6 +122,18 @@ impl<M: StorageMedium> core::fmt::Debug for BlockHeader<M> {
     }
 }
 
+#[cfg(feature = "defmt")]
+impl<M: StorageMedium> defmt::Format for BlockHeader<M> {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(
+            f,
+            "BlockHeader {{ header: {:?}, erase_count: {:?} }}",
+            self.header,
+            self.erase_count
+        )
+    }
+}
+
 impl<M: StorageMedium> Clone for BlockHeader<M> {
     fn clone(&self) -> Self {
         *self
@@ -173,7 +188,7 @@ impl<M: StorageMedium> BlockHeader<M> {
     }
 
     async fn write(self, block: usize, medium: &mut M) -> Result<(), StorageError> {
-        log::trace!("BlockHeader::write({self:?}, {block})");
+        trace!("BlockHeader::write({:?}, {})", self, block);
         let (bytes, byte_count) = self.into_bytes();
         medium.write(block, 0, &bytes[0..byte_count]).await
     }
@@ -211,6 +226,19 @@ impl<M: StorageMedium> core::fmt::Debug for BlockInfo<M> {
             .field("used_bytes", &self.used_bytes)
             .field("allow_alloc", &self.allow_alloc)
             .finish()
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<M: StorageMedium> defmt::Format for BlockInfo<M> {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(
+            f,
+            "BlockInfo {{ header: {:?}, used_bytes: {:?}, allow_alloc: {:?} }}",
+            self.header,
+            self.used_bytes,
+            self.allow_alloc
+        )
     }
 }
 
@@ -388,7 +416,7 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
         }
 
         if erase {
-            log::debug!("Erasing block {block}");
+            debug!("Erasing block {}", block);
             self.medium.erase(block).await?;
         }
 
@@ -468,7 +496,7 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
             used_bytes,
             allow_alloc: last_object_reliable,
         };
-        log::trace!("BlockOps::scan_block({block}) -> {info:?}");
+        trace!("BlockOps::scan_block({}) -> {:?}", block, info);
 
         Ok(info)
     }

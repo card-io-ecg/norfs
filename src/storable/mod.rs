@@ -11,11 +11,13 @@ use embedded_io::{
 use crate::{medium::StorageMedium, writer::FileDataWriter, StorageError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ConversionError {
     InvalidValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum LoadError<E: Error> {
     InvalidValue,
     UnexpectedEof,
@@ -82,6 +84,7 @@ mod test {
     use super::LoadError;
 
     #[derive(Debug, PartialEq, Eq)]
+    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
     enum TestType {
         A { foo: u8, bar: u32 },
         B,

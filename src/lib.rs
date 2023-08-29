@@ -34,8 +34,11 @@ pub mod storable;
 pub mod varint;
 pub mod writer;
 
+mod logger;
+
 /// Error values returned by storage operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum StorageError {
     /// The file does not exist.
     NotFound,
@@ -108,7 +111,12 @@ where
         min_free: usize,
         allow_gc_block: bool,
     ) -> Result<usize, StorageError> {
-        log::trace!("Storage::allocate_object({ty:?}, {min_free}, {allow_gc_block:?})");
+        trace!(
+            "Storage::allocate_object({:?}, {}, {:?})",
+            ty,
+            min_free,
+            allow_gc_block
+        );
 
         // Predicates
         fn and<M: StorageMedium>(
@@ -159,7 +167,7 @@ where
             })?;
 
         if self.blocks[location.block].is_unassigned() {
-            log::debug!("Setting block {} to {ty:?}", location.block);
+            debug!("Setting block {} to {:?}", location.block, ty);
             BlockOps::new(medium)
                 .set_block_type(location.block, ty)
                 .await?;
@@ -223,6 +231,7 @@ where
 
 /// Controls what happens when storing data to a file that already exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum OnCollision {
     /// Overwrite the existing file.
     Overwrite,
@@ -311,7 +320,7 @@ where
 
     /// Deletes the file at `path`.
     pub async fn delete(&mut self, path: &str) -> Result<(), StorageError> {
-        log::debug!("Storage::delete({path})");
+        debug!("Storage::delete({})", path);
         let location = self.lookup(path).await?;
         self.delete_file_at(location).await
     }
@@ -360,8 +369,9 @@ where
         data: &impl FileDataWriter,
         if_exists: OnCollision,
     ) -> Result<(), StorageError> {
-        log::debug!(
-            "Storage::store_writer({path}, estimated = {})",
+        debug!(
+            "Storage::store_writer({}, estimated = {})",
+            path,
             data.estimate_length()
         );
 
@@ -377,13 +387,11 @@ where
         };
 
         if overwritten.is_some() && if_exists == OnCollision::Fail {
-            log::debug!("File already exists at path: {path}");
+            debug!("File already exists at path: {}", path);
             return Err(StorageError::InvalidOperation);
         }
 
-        if let Some(overwritten) = overwritten.as_ref() {
-            log::debug!("Overwriting location: {overwritten:?}");
-        }
+        debug!("Overwriting location: {:?}", overwritten);
 
         // TODO: reuse filename object
         Writer::create(path, self, data).await?;
@@ -397,7 +405,7 @@ where
 
     /// Convenience method for checking if a file exists. Ignores all errors.
     pub async fn exists(&mut self, path: &str) -> bool {
-        log::debug!("Storage::exists({path})");
+        debug!("Storage::exists({})", path);
         self.lookup(path).await.is_ok()
     }
 
@@ -407,7 +415,7 @@ where
     ///
     /// Modifying the filesystem while a reader is open results in undefined behaviour.
     pub async fn read(&mut self, path: &str) -> Result<Reader<M>, StorageError> {
-        log::debug!("Storage::read({path})");
+        debug!("Storage::read({})", path);
         let object = self.lookup(path).await?;
         let metadata = object.read_metadata(&mut self.medium).await?;
         Ok(Reader::new(metadata))
@@ -415,7 +423,7 @@ where
 
     /// Returns the content size of the file at `path`.
     pub async fn file_size(&mut self, path: &str) -> Result<usize, StorageError> {
-        log::debug!("Storage::file_size({path})");
+        debug!("Storage::file_size({})", path);
         let object = self.lookup(path).await?;
 
         let mut meta = object.read_metadata(&mut self.medium).await?;
@@ -430,7 +438,7 @@ where
     }
 
     pub async fn read_dir(&mut self) -> Result<ReadDir<M>, StorageError> {
-        log::debug!("Storage::read_dir");
+        debug!("Storage::read_dir");
         Ok(ReadDir::new(self))
     }
 
@@ -488,7 +496,7 @@ where
             }
         }
 
-        log::trace!("Storage::make_space_for({len}) done");
+        trace!("Storage::make_space_for({}) done", len);
         Ok(())
     }
 
@@ -593,7 +601,7 @@ where
         &mut self,
         object: &ObjectInfo<M>,
     ) -> Result<ObjectInfo<M>, StorageError> {
-        log::trace!("Storage::find_metadata_of_object({:?})", object.location());
+        trace!("Storage::find_metadata_of_object({:?})", object.location());
         for block in self.blocks.blocks(BlockType::Metadata) {
             let mut objects = block.objects();
             while let Some(meta_object) = objects.next(&mut self.medium).await? {
@@ -606,7 +614,7 @@ where
                 let mut meta = meta_object.read_metadata(&mut self.medium).await?;
                 while let Some(loc) = meta.next_object_location(&mut self.medium).await? {
                     if loc == object.location() {
-                        log::trace!(
+                        trace!(
                             "Storage::find_metadata_of_object({:?}) -> {:?}",
                             object.location(),
                             meta_object.location()
@@ -625,7 +633,7 @@ where
         ty: BlockType,
         len: usize,
     ) -> Result<ObjectLocation, StorageError> {
-        log::trace!("Storage::find_new_object_location({ty:?}, {len})");
+        trace!("Storage::find_new_object_location({:?}, {})", ty, len);
 
         // find block with most free space
         let object_size = M::align(ObjectHeader::byte_count::<M>()) + len;
@@ -634,7 +642,12 @@ where
             .allocate_new_object(ty, object_size, &mut self.medium)
             .await?;
 
-        log::trace!("Storage::find_new_object_location({ty:?}, {len}) -> {location:?}");
+        trace!(
+            "Storage::find_new_object_location({:?}, {}) -> {:?}",
+            ty,
+            len,
+            location
+        );
 
         Ok(location)
     }
@@ -660,18 +673,21 @@ trait ObjectMover: Debug {
         M: StorageMedium,
         [(); M::BLOCK_COUNT]:,
     {
-        log::debug!("{self:?}::try_to_make_space()");
+        debug!("{:?}::try_to_make_space()", self);
         let Some((block_to_free, freeable)) = storage
             .blocks
             .find_block_to_free(&mut storage.medium)
             .await?
         else {
-            log::debug!("Could not find a block to free");
+            debug!("Could not find a block to free");
             return Err(StorageError::InsufficientSpace);
         };
 
         if freeable != block_to_free.used_bytes() {
-            log::debug!("{self:?}::try_to_make_space(): Moving objects out of block to free");
+            debug!(
+                "{:?}::try_to_make_space(): Moving objects out of block to free",
+                self
+            );
             // We need to move objects out of this block
             let mut iter = block_to_free.objects();
 
@@ -679,7 +695,7 @@ trait ObjectMover: Debug {
                 match object.state() {
                     ObjectState::Free | ObjectState::Deleted => continue,
                     ObjectState::Allocated => {
-                        log::warn!("Encountered an allocated object");
+                        warn!("Encountered an allocated object");
                         // TODO: retry in a different object
                         return Err(StorageError::InsufficientSpace);
                     }
@@ -709,6 +725,7 @@ trait ObjectMover: Debug {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 struct DataObject;
 
 impl ObjectMover for DataObject {
@@ -724,7 +741,7 @@ impl ObjectMover for DataObject {
         M: StorageMedium,
         [(); M::BLOCK_COUNT]:,
     {
-        log::trace!("{self:?}::move_object");
+        trace!("{:?}::move_object", self);
 
         let mut meta = storage.find_metadata_of_object(&object).await?;
         let new_meta_location = match storage
@@ -744,13 +761,15 @@ impl ObjectMover for DataObject {
             Err(e) => return Err(e),
         };
 
-        log::debug!(
-            "Moving data object {:?} to {destination:?}",
-            object.location()
+        debug!(
+            "Moving data object {:?} to {:?}",
+            object.location(),
+            destination
         );
-        log::debug!(
-            "Moving meta object {:?} to {new_meta_location:?}",
-            meta.location()
+        debug!(
+            "Moving meta object {:?} to {:?}",
+            meta.location(),
+            new_meta_location
         );
 
         // copy metadata object while replacing current object location to new location
@@ -810,6 +829,7 @@ impl ObjectMover for DataObject {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 struct MetaObject;
 
 impl ObjectMover for MetaObject {
@@ -825,7 +845,7 @@ impl ObjectMover for MetaObject {
         M: StorageMedium,
         [(); M::BLOCK_COUNT]:,
     {
-        log::trace!("{self:?}::move_object");
+        trace!("{:?}::move_object", self);
         let info = object.move_object(&mut storage.medium, destination).await?;
         storage.blocks.blocks[destination.block].add_used_bytes(info.total_size());
 
@@ -959,17 +979,17 @@ mod test {
 
                     crate::test::init_test();
 
-                    log::info!("Running test case with create_default_fs");
+                    crate::info!("Running test case with create_default_fs");
                     test_case_impl(crate::test::create_default_fs().await).await;
-                    log::info!("Running test case with create_larger_fs");
+                    crate::info!("Running test case with create_larger_fs");
                     test_case_impl(crate::test::create_larger_fs().await).await;
-                    log::info!("Running test case with create_word_granularity_fs::<1>");
+                    crate::info!("Running test case with create_word_granularity_fs::<1>");
                     test_case_impl(crate::test::create_word_granularity_fs::<1>().await).await;
-                    log::info!("Running test case with create_word_granularity_fs::<4>");
+                    crate::info!("Running test case with create_word_granularity_fs::<4>");
                     test_case_impl(crate::test::create_word_granularity_fs::<4>().await).await;
-                    log::info!("Running test case with create_aligned_fs");
+                    crate::info!("Running test case with create_aligned_fs");
                     test_case_impl(crate::test::create_aligned_fs().await).await;
-                    log::info!("Running test case with create_aligned_fs_with_read_cache");
+                    crate::info!("Running test case with create_aligned_fs_with_read_cache");
                     test_case_impl(crate::test::create_aligned_fs_with_read_cache().await).await;
                 }
             )+

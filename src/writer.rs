@@ -1,11 +1,11 @@
 use crate::{
-    hash_path,
+    debug, hash_path,
     ll::{
         blocks::BlockType,
         objects::{ObjectLocation, ObjectReader, ObjectType, ObjectWriter},
     },
     medium::{StorageMedium, StoragePrivate},
-    Storage, StorageError,
+    warn, Storage, StorageError,
 };
 
 pub trait FileDataWriter {
@@ -49,7 +49,7 @@ where
             Err(e) => return Err(e),
         }
 
-        log::debug!("Reallocating metadata object");
+        debug!("Reallocating metadata object");
         // Old object's accounting
         storage.blocks.blocks[self.metadata.location().block]
             .add_used_bytes(self.metadata.total_size());
@@ -156,10 +156,10 @@ where
         storage: &mut Storage<M>,
         op: &impl FileDataWriter,
     ) -> Result<(), StorageError> {
-        log::debug!("Writer::create(path = {:?})", path);
+        debug!("Writer::create(path = {:?})", path);
 
         if path.contains(&['/', '\\'][..]) {
-            log::warn!("Path contains invalid characters");
+            warn!("Path contains invalid characters");
             return Err(StorageError::InvalidOperation);
         }
 

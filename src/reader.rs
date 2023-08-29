@@ -1,6 +1,7 @@
 use embedded_io::blocking::ReadExactError;
 
 use crate::{
+    debug,
     ll::objects::{MetadataObjectHeader, ObjectReader},
     medium::StorageMedium,
     storable::{LoadError, Loadable},
@@ -48,7 +49,7 @@ where
         storage: &mut Storage<M>,
         mut buf: &mut [u8],
     ) -> Result<usize, StorageError> {
-        log::debug!("Reader::read(len = {})", buf.len());
+        debug!("Reader::read(len = {})", buf.len());
 
         let medium = &mut storage.medium;
 
@@ -83,7 +84,7 @@ where
         storage: &mut Storage<M>,
         buf: &mut [u8],
     ) -> Result<(), StorageError> {
-        log::debug!("Reader::read_all(len = {})", buf.len());
+        debug!("Reader::read_all(len = {})", buf.len());
 
         if !buf.is_empty() {
             let read = self.read(storage, buf).await?;
