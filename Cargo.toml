@@ -23,9 +23,10 @@ async-std = { version = "1", features = ["attributes"] }
 simple_logger = "4.1"
 
 [features]
-default = []
+default = ["alloc"]
 internal-flash = ["esp32s3"]
 esp32s3 = ["internal-flash"]
 critical-section = ["dep:critical-section"]
 defmt = ["dep:defmt"]
 log = ["dep:log"]
+alloc = []

@@ -36,6 +36,9 @@ pub mod writer;
 
 mod logger;
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 /// Error values returned by storage operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

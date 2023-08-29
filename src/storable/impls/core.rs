@@ -143,14 +143,24 @@ impl<T: Storable, E: Storable> Storable for Result<T, E> {
     }
 }
 
+impl<T: Storable> Storable for &[T] {
+    async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
+        self.len().store(writer).await?;
+        for item in *self {
+            item.store(writer).await?;
+        }
+        Ok(())
+    }
+}
+
 impl Storable for &str {
     async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
-        writer.write_all(self.as_bytes()).await
+        self.as_bytes().store(writer).await
     }
 }
 
 impl Storable for &CStr {
     async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
-        writer.write_all(self.to_bytes()).await
+        self.to_bytes().store(writer).await
     }
 }
