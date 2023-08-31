@@ -656,9 +656,15 @@ where
     }
 }
 
+#[cfg(feature = "defmt")]
+trait Loggable: Debug + defmt::Format {}
+
+#[cfg(not(feature = "defmt"))]
+trait Loggable: Debug {}
+
 // Async functions can't be recursive. Splitting out implementation for each block type means
 // we can reuse code without recursion.
-trait ObjectMover: Debug {
+trait ObjectMover: Loggable {
     const BLOCK_TYPE: BlockType;
 
     async fn move_object<M>(
@@ -730,6 +736,8 @@ trait ObjectMover: Debug {
 #[derive(Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 struct DataObject;
+
+impl Loggable for DataObject {}
 
 impl ObjectMover for DataObject {
     const BLOCK_TYPE: BlockType = BlockType::Data;
@@ -834,6 +842,8 @@ impl ObjectMover for DataObject {
 #[derive(Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 struct MetaObject;
+
+impl Loggable for MetaObject {}
 
 impl ObjectMover for MetaObject {
     const BLOCK_TYPE: BlockType = BlockType::Metadata;
