@@ -900,13 +900,19 @@ mod test {
 
     const LIPSUM: &[u8] = b"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Fusce i";
 
+    #[cfg(feature = "log")]
     pub fn init_test() {
-        _ = simple_logger::SimpleLogger::new()
-            .with_level(log::LevelFilter::Trace)
-            .env()
-            .init();
+        _ = {
+            simple_logger::SimpleLogger::new()
+                .with_level(log::LevelFilter::Trace)
+                .env()
+                .init()
+        };
         println!();
     }
+
+    #[cfg(not(feature = "log"))]
+    pub fn init_test() {}
 
     pub(crate) async fn create_default_fs() -> Storage<NorRamStorage<256, 32>> {
         let medium = NorRamStorage::<256, 32>::new();
@@ -1166,6 +1172,21 @@ mod test {
                     _ => panic!("Unexpected file"),
                 }
             }
+        }
+
+        async fn dir_entry_size<M: StorageMedium>(
+            mut storage: Storage<M>,
+        ) {
+            storage.store("foo", b"bar", OnCollision::Overwrite).await.expect("Create failed");
+
+            let mut files = storage.read_dir().await.expect("Failed to list files");
+
+            let file = files.next(&mut storage).await.unwrap().unwrap();
+
+            assert_eq!(3, file.size(&mut storage).await.unwrap());
+
+            // Second call returns the same value - internal iteration doesn't advance.
+            assert_eq!(3, file.size(&mut storage).await.unwrap());
         }
 
         async fn read_dir_can_delete_files<M: StorageMedium>(

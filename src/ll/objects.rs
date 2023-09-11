@@ -567,6 +567,19 @@ pub struct MetadataObjectHeader<M: StorageMedium> {
     _medium: PhantomData<M>,
 }
 
+impl<M: StorageMedium> Clone for MetadataObjectHeader<M> {
+    fn clone(&self) -> Self {
+        Self {
+            object: self.object,
+            path_hash: self.path_hash,
+            filename_location: self.filename_location,
+            data_object_cursor: self.data_object_cursor,
+            _parent: self._parent,
+            _medium: PhantomData,
+        }
+    }
+}
+
 impl<M: StorageMedium> MetadataObjectHeader<M> {
     /// Returns the location of the next data object of the current file.
     pub async fn next_object_location(

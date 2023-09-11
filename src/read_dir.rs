@@ -54,6 +54,18 @@ where
     pub async fn delete(self, storage: &mut Storage<M>) -> Result<(), StorageError> {
         storage.delete_file_at(self.metadata.location()).await
     }
+
+    pub async fn size(&self, storage: &mut Storage<M>) -> Result<usize, StorageError> {
+        let mut meta = self.metadata.clone();
+
+        let mut size = 0;
+        while let Some(chunk) = meta.next_object_location(&mut storage.medium).await? {
+            let data_object = ObjectReader::new(chunk, &mut storage.medium, false).await?;
+            size += data_object.len();
+        }
+
+        Ok(size)
+    }
 }
 
 pub struct ReadDir<M>
