@@ -67,6 +67,47 @@ impl Drop for UnlockToken<'_> {
     }
 }
 
+#[link_section = ".rwtext"]
+#[inline(never)]
+fn wait_idle() -> Result<(), MediumError> {
+    const SR_WIP: u32 = 1 << 0;
+
+    let mut status = 0x01;
+    while status & SR_WIP != 0 {
+        if esp_rom_spiflash_read_user_cmd(&mut status, 0x05) != 0 {
+            return Err(MediumError::Write);
+        }
+    }
+    Ok(())
+}
+
+#[link_section = ".rwtext"]
+fn write_impl(offset: usize, ptr: *const u32, len: usize) -> Result<(), MediumError> {
+    if esp_rom_spiflash_write(offset as u32, ptr, len as u32) == 0 {
+        wait_idle()
+    } else {
+        Err(MediumError::Write)
+    }
+}
+
+#[link_section = ".rwtext"]
+fn erase_sector_impl(sector: usize) -> Result<(), MediumError> {
+    if esp_rom_spiflash_erase_sector(sector as u32) == 0 {
+        wait_idle()
+    } else {
+        Err(MediumError::Erase)
+    }
+}
+
+#[link_section = ".rwtext"]
+fn erase_block_impl(block: usize) -> Result<(), MediumError> {
+    if esp_rom_spiflash_erase_block(block as u32) == 0 {
+        wait_idle()
+    } else {
+        Err(MediumError::Erase)
+    }
+}
+
 pub struct InternalDriver<P: InternalPartition> {
     unlocked: bool,
     _partition: P,
@@ -90,21 +131,6 @@ impl<P: InternalPartition> InternalDriver<P> {
 
         Ok(UnlockToken(&mut self.unlocked))
     }
-
-    async fn wait_idle() -> Result<(), MediumError> {
-        const SR_WIP: u32 = 1 << 0;
-
-        let mut status = 0x00;
-        loop {
-            if esp_rom_spiflash_read_user_cmd(&mut status, 0x05) != 0 {
-                return Err(MediumError::Write);
-            }
-            if status & SR_WIP == 0 {
-                return Ok(());
-            }
-            embassy_futures::yield_now().await;
-        }
-    }
 }
 
 impl<P: InternalPartition> AlignedStorage for InternalDriver<P> {
@@ -119,11 +145,7 @@ impl<P: InternalPartition> AlignedStorage for InternalDriver<P> {
         let offset = P::OFFSET / Self::BLOCK_SIZE;
         let block = offset + block;
 
-        if esp_rom_spiflash_erase_block(block as u32) == 0 {
-            Self::wait_idle().await
-        } else {
-            Err(MediumError::Erase)
-        }
+        erase_block_impl(block)
     }
 
     async fn read_aligned(
@@ -144,6 +166,7 @@ impl<P: InternalPartition> AlignedStorage for InternalDriver<P> {
         }
     }
 
+    #[link_section = ".rwtext"]
     async fn write_aligned(
         &mut self,
         block: usize,
@@ -152,16 +175,12 @@ impl<P: InternalPartition> AlignedStorage for InternalDriver<P> {
     ) -> Result<(), MediumError> {
         let _token = self.unlock()?;
 
-        let len = data.len() as u32;
+        let len = data.len();
         let ptr = data.as_ptr().cast();
 
         let offset = P::OFFSET + block * Self::BLOCK_SIZE + offset;
 
-        if esp_rom_spiflash_write(offset as u32, ptr, len) == 0 {
-            Self::wait_idle().await
-        } else {
-            Err(MediumError::Write)
-        }
+        write_impl(offset, ptr, len)
     }
 }
 
@@ -188,21 +207,6 @@ impl<P: InternalPartition> SmallInternalDriver<P> {
 
         Ok(UnlockToken(&mut self.unlocked))
     }
-
-    async fn wait_idle() -> Result<(), MediumError> {
-        const SR_WIP: u32 = 1 << 0;
-
-        let mut status = 0x00;
-        loop {
-            if esp_rom_spiflash_read_user_cmd(&mut status, 0x05) != 0 {
-                return Err(MediumError::Write);
-            }
-            if status & SR_WIP == 0 {
-                return Ok(());
-            }
-            embassy_futures::yield_now().await;
-        }
-    }
 }
 
 impl<P: InternalPartition> AlignedStorage for SmallInternalDriver<P> {
@@ -217,11 +221,7 @@ impl<P: InternalPartition> AlignedStorage for SmallInternalDriver<P> {
         let offset = P::OFFSET / Self::BLOCK_SIZE;
         let block = offset + block;
 
-        if esp_rom_spiflash_erase_sector(block as u32) == 0 {
-            Self::wait_idle().await
-        } else {
-            Err(MediumError::Erase)
-        }
+        erase_sector_impl(block)
     }
 
     async fn read_aligned(
@@ -250,15 +250,11 @@ impl<P: InternalPartition> AlignedStorage for SmallInternalDriver<P> {
     ) -> Result<(), MediumError> {
         let _token = self.unlock()?;
 
-        let len = data.len() as u32;
+        let len = data.len();
         let ptr = data.as_ptr().cast();
 
         let offset = P::OFFSET + block * Self::BLOCK_SIZE + offset;
 
-        if esp_rom_spiflash_write(offset as u32, ptr, len) == 0 {
-            Self::wait_idle().await
-        } else {
-            Err(MediumError::Write)
-        }
+        write_impl(offset, ptr, len)
     }
 }
