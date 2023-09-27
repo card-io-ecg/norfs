@@ -7,10 +7,7 @@ pub mod implem;
 #[inline(always)]
 #[link_section = ".rwtext"]
 fn maybe_with_critical_section<R>(f: impl FnOnce() -> R) -> R {
-    return critical_section::with(|_| f());
-
-    #[cfg(not(feature = "critical-section"))]
-    f()
+    critical_section::with(|_| f())
 }
 
 #[cfg(not(feature = "critical-section"))]
