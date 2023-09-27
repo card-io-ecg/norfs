@@ -1,4 +1,4 @@
-use crate::{drivers::aligned::AlignedStorage, StorageError};
+use norfs_driver::{aligned::AlignedStorage, medium::MediumError};
 
 use super::WriteGranularity;
 
@@ -51,7 +51,7 @@ impl<const STORAGE_SIZE: usize, const BLOCK_SIZE: usize> AlignedStorage
     const WRITE_GRANULARITY: WriteGranularity = WriteGranularity::Bit;
     const PAGE_SIZE: usize = BLOCK_SIZE;
 
-    async fn erase(&mut self, block: usize) -> Result<(), StorageError> {
+    async fn erase(&mut self, block: usize) -> Result<(), MediumError> {
         let offset = Self::offset(block, 0);
 
         self.data[offset..offset + Self::BLOCK_SIZE].fill(u32::MAX);
@@ -64,7 +64,7 @@ impl<const STORAGE_SIZE: usize, const BLOCK_SIZE: usize> AlignedStorage
         block: usize,
         offset: usize,
         data: &mut [u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         assert!(
             offset + data.len() <= Self::BLOCK_SIZE * 4,
             "{offset} + {} <= {}",
@@ -98,7 +98,7 @@ impl<const STORAGE_SIZE: usize, const BLOCK_SIZE: usize> AlignedStorage
         block: usize,
         offset: usize,
         data: &[u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         assert!(
             offset + data.len() <= Self::BLOCK_SIZE * 4,
             "{offset} + {} <= {}",

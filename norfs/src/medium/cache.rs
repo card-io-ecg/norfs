@@ -1,4 +1,6 @@
-use crate::{medium::StorageMedium, StorageError};
+use norfs_driver::medium::MediumError;
+
+use crate::medium::StorageMedium;
 
 use super::WriteGranularity;
 
@@ -171,7 +173,7 @@ impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> ReadCache<M, SIZE,
         self.cache.get_if_in_cache(block, offset, len).is_some()
     }
 
-    async fn load_into_cache(&mut self, block: usize, offset: usize) -> Result<(), StorageError> {
+    async fn load_into_cache(&mut self, block: usize, offset: usize) -> Result<(), MediumError> {
         let page = self.cache.allocate_cache_page();
         let offset = offset.min(M::BLOCK_SIZE - SIZE);
 
@@ -199,7 +201,7 @@ impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> StorageMedium
     const BLOCK_COUNT: usize = M::BLOCK_COUNT;
     const WRITE_GRANULARITY: WriteGranularity = M::WRITE_GRANULARITY;
 
-    async fn erase(&mut self, block: usize) -> Result<(), StorageError> {
+    async fn erase(&mut self, block: usize) -> Result<(), MediumError> {
         self.cache.erase_pages_in_block(block);
 
         self.medium.erase(block).await
@@ -210,7 +212,7 @@ impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> StorageMedium
         block: usize,
         offset: usize,
         data: &mut [u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         if !self.is_cached(block, offset, data.len()) {
             // We could load partial data from cache,
             // but it's not worth the complexity at this moment.
@@ -227,12 +229,7 @@ impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> StorageMedium
         Ok(())
     }
 
-    async fn write(
-        &mut self,
-        block: usize,
-        offset: usize,
-        data: &[u8],
-    ) -> Result<(), StorageError> {
+    async fn write(&mut self, block: usize, offset: usize, data: &[u8]) -> Result<(), MediumError> {
         self.medium.write(block, offset, data).await?;
 
         self.update_cache_if_overlaps(block, offset, data);
@@ -248,7 +245,7 @@ impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> StorageMedium
     const BLOCK_COUNT: usize = M::BLOCK_COUNT;
     const WRITE_GRANULARITY: WriteGranularity = M::WRITE_GRANULARITY;
 
-    async fn erase(&mut self, block: usize) -> Result<(), StorageError> {
+    async fn erase(&mut self, block: usize) -> Result<(), MediumError> {
         ReadCache::erase(self, block).await
     }
 
@@ -257,16 +254,11 @@ impl<M: StorageMedium, const SIZE: usize, const PAGES: usize> StorageMedium
         block: usize,
         offset: usize,
         data: &mut [u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         ReadCache::read(self, block, offset, data).await
     }
 
-    async fn write(
-        &mut self,
-        block: usize,
-        offset: usize,
-        data: &[u8],
-    ) -> Result<(), StorageError> {
+    async fn write(&mut self, block: usize, offset: usize, data: &[u8]) -> Result<(), MediumError> {
         ReadCache::write(self, block, offset, data).await
     }
 }

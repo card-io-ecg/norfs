@@ -34,7 +34,7 @@ use core::marker::PhantomData;
 use crate::{
     debug, error,
     ll::blocks::BlockHeader,
-    medium::{StorageMedium, StoragePrivate, WriteGranularity},
+    medium::{StorageMedium, WriteGranularity},
     trace, warn, StorageError,
 };
 
@@ -287,7 +287,9 @@ impl CompositeObjectState {
     ) -> Result<(), StorageError> {
         medium
             .write(location.block, location.offset, &[object_type as u8])
-            .await
+            .await?;
+
+        Ok(())
     }
 
     async fn write_object_data_state<M: StorageMedium>(
@@ -306,7 +308,9 @@ impl CompositeObjectState {
         let (offset, byte) = data_state.into_raw::<M>();
         medium
             .write(location.block, location.offset + offset, &[byte])
-            .await
+            .await?;
+
+        Ok(())
     }
 }
 

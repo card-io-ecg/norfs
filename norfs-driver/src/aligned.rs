@@ -1,6 +1,6 @@
 use crate::{
+    medium::MediumError,
     medium::{StorageMedium, WriteGranularity},
-    StorageError,
 };
 
 #[repr(align(4))]
@@ -28,19 +28,21 @@ pub trait AlignedStorage {
     const WRITE_GRANULARITY: WriteGranularity;
     const PAGE_SIZE: usize;
 
-    async fn erase(&mut self, block: usize) -> Result<(), StorageError>;
+    async fn erase(&mut self, block: usize) -> Result<(), MediumError>;
+
     async fn read_aligned(
         &mut self,
         block: usize,
         offset: usize,
         data: &mut [u8],
-    ) -> Result<(), StorageError>;
+    ) -> Result<(), MediumError>;
+
     async fn write_aligned(
         &mut self,
         block: usize,
         offset: usize,
         data: &[u8],
-    ) -> Result<(), StorageError>;
+    ) -> Result<(), MediumError>;
 }
 
 impl<T: AlignedStorage> StorageMedium for T
@@ -51,7 +53,7 @@ where
     const BLOCK_COUNT: usize = <T as AlignedStorage>::BLOCK_COUNT;
     const WRITE_GRANULARITY: WriteGranularity = <T as AlignedStorage>::WRITE_GRANULARITY;
 
-    async fn erase(&mut self, block: usize) -> Result<(), StorageError> {
+    async fn erase(&mut self, block: usize) -> Result<(), MediumError> {
         AlignedStorage::erase(self, block).await
     }
 
@@ -60,7 +62,7 @@ where
         block: usize,
         mut offset: usize,
         mut data: &mut [u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         if offset % 4 != 0 {
             let align_amt = offset % 4;
             let aligned_offset = offset - align_amt;
@@ -127,7 +129,7 @@ where
         block: usize,
         mut offset: usize,
         mut data: &[u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         if offset % 4 != 0 {
             let align_amt = offset % 4;
             let aligned_offset = offset - align_amt;

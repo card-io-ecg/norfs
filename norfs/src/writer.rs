@@ -4,7 +4,7 @@ use crate::{
         blocks::BlockType,
         objects::{ObjectLocation, ObjectReader, ObjectType, ObjectWriter},
     },
-    medium::{StorageMedium, StoragePrivate},
+    medium::StorageMedium,
     warn, Storage, StorageError,
 };
 

@@ -6,7 +6,7 @@ use core::{
 use crate::{
     debug,
     ll::objects::{ObjectIterator, ObjectState},
-    medium::{StorageMedium, StoragePrivate, WriteGranularity},
+    medium::{StorageMedium, WriteGranularity},
     trace, StorageError,
 };
 
@@ -190,7 +190,9 @@ impl<M: StorageMedium> BlockHeader<M> {
     async fn write(self, block: usize, medium: &mut M) -> Result<(), StorageError> {
         trace!("BlockHeader::write({:?}, {})", self, block);
         let (bytes, byte_count) = self.into_bytes();
-        medium.write(block, 0, &bytes[0..byte_count]).await
+        medium.write(block, 0, &bytes[0..byte_count]).await?;
+
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -442,7 +444,9 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
     ) -> Result<(), StorageError> {
         self.medium
             .write(block, offset + BlockHeader::<M>::byte_count(), data)
-            .await
+            .await?;
+
+        Ok(())
     }
 
     pub async fn read_data(
@@ -453,7 +457,9 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
     ) -> Result<(), StorageError> {
         self.medium
             .read(block, offset + BlockHeader::<M>::byte_count(), data)
-            .await
+            .await?;
+
+        Ok(())
     }
 
     pub async fn scan_block(&mut self, block: usize) -> Result<BlockInfo<M>, StorageError> {
@@ -512,7 +518,9 @@ impl<'a, M: StorageMedium> BlockOps<'a, M> {
             _ => unimplemented!(),
         };
 
-        self.medium.write(block, offset, &[ty as u8]).await
+        self.medium.write(block, offset, &[ty as u8]).await?;
+
+        Ok(())
     }
 }
 

@@ -1,4 +1,6 @@
-use crate::{medium::StorageMedium, StorageError};
+use norfs_driver::medium::MediumError;
+
+use crate::medium::StorageMedium;
 
 use super::WriteGranularity;
 
@@ -49,7 +51,7 @@ impl<const STORAGE_SIZE: usize, const BLOCK_SIZE: usize, const GRANULARITY: usiz
     const BLOCK_COUNT: usize = STORAGE_SIZE / BLOCK_SIZE;
     const WRITE_GRANULARITY: WriteGranularity = WriteGranularity::Word(GRANULARITY);
 
-    async fn erase(&mut self, block: usize) -> Result<(), StorageError> {
+    async fn erase(&mut self, block: usize) -> Result<(), MediumError> {
         let offset = Self::offset(block, 0);
 
         self.data[offset..offset + Self::BLOCK_SIZE].fill(0xFF);
@@ -62,7 +64,7 @@ impl<const STORAGE_SIZE: usize, const BLOCK_SIZE: usize, const GRANULARITY: usiz
         block: usize,
         offset: usize,
         data: &mut [u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         assert!(
             offset + data.len() <= Self::BLOCK_SIZE,
             "{offset} + {} <= {}",
@@ -76,12 +78,7 @@ impl<const STORAGE_SIZE: usize, const BLOCK_SIZE: usize, const GRANULARITY: usiz
         Ok(())
     }
 
-    async fn write(
-        &mut self,
-        block: usize,
-        offset: usize,
-        data: &[u8],
-    ) -> Result<(), StorageError> {
+    async fn write(&mut self, block: usize, offset: usize, data: &[u8]) -> Result<(), MediumError> {
         assert!(
             offset + data.len() <= Self::BLOCK_SIZE,
             "{offset} + {} <= {}",

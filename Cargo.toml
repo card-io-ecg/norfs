@@ -3,4 +3,6 @@ resolver = "2"
 
 members = [
     "norfs",
+    "norfs-driver",
+    "norfs-esp32s3",
 ]

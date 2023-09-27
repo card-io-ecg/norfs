@@ -1,7 +1,6 @@
-use crate::{
-    medium::{StorageMedium, WriteGranularity},
-    StorageError,
-};
+use norfs_driver::medium::MediumError;
+
+use crate::medium::{StorageMedium, WriteGranularity};
 
 pub struct Counters<P>
 where
@@ -21,7 +20,7 @@ where
     const BLOCK_COUNT: usize = P::BLOCK_COUNT;
     const WRITE_GRANULARITY: WriteGranularity = P::WRITE_GRANULARITY;
 
-    async fn erase(&mut self, block: usize) -> Result<(), StorageError> {
+    async fn erase(&mut self, block: usize) -> Result<(), MediumError> {
         self.erase_count = self.erase_count.saturating_add(1);
         self.medium.erase(block).await
     }
@@ -31,17 +30,12 @@ where
         block: usize,
         offset: usize,
         data: &mut [u8],
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), MediumError> {
         self.read_count = self.read_count.saturating_add(1);
         self.medium.read(block, offset, data).await
     }
 
-    async fn write(
-        &mut self,
-        block: usize,
-        offset: usize,
-        data: &[u8],
-    ) -> Result<(), StorageError> {
+    async fn write(&mut self, block: usize, offset: usize, data: &[u8]) -> Result<(), MediumError> {
         self.write_count = self.write_count.saturating_add(1);
         self.medium.write(block, offset, data).await
     }

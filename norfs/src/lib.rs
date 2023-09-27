@@ -7,6 +7,8 @@
 
 use core::fmt::Debug;
 
+use norfs_driver::medium::MediumError;
+
 use crate::{
     diag::Counters,
     ll::{
@@ -16,14 +18,13 @@ use crate::{
             ObjectType, ObjectWriter,
         },
     },
-    medium::{StorageMedium, StoragePrivate},
+    medium::StorageMedium,
     read_dir::ReadDir,
     reader::Reader,
     writer::{FileDataWriter, Writer},
 };
 
 pub mod diag;
-pub mod drivers;
 pub mod fxhash;
 pub mod gc;
 pub mod ll;
@@ -71,6 +72,12 @@ pub enum StorageError {
 impl embedded_io::Error for StorageError {
     fn kind(&self) -> embedded_io::ErrorKind {
         embedded_io::ErrorKind::Other
+    }
+}
+
+impl From<MediumError> for StorageError {
+    fn from(_: MediumError) -> Self {
+        Self::Io
     }
 }
 
