@@ -83,29 +83,35 @@ fn wait_idle() -> Result<(), MediumError> {
 
 #[link_section = ".rwtext"]
 fn write_impl(offset: usize, ptr: *const u32, len: usize) -> Result<(), MediumError> {
-    if esp_rom_spiflash_write(offset as u32, ptr, len as u32) == 0 {
-        wait_idle()
-    } else {
-        Err(MediumError::Write)
-    }
+    maybe_with_critical_section(|| {
+        if esp_rom_spiflash_write(offset as u32, ptr, len as u32) == 0 {
+            wait_idle()
+        } else {
+            Err(MediumError::Write)
+        }
+    })
 }
 
 #[link_section = ".rwtext"]
 fn erase_sector_impl(sector: usize) -> Result<(), MediumError> {
-    if esp_rom_spiflash_erase_sector(sector as u32) == 0 {
-        wait_idle()
-    } else {
-        Err(MediumError::Erase)
-    }
+    maybe_with_critical_section(|| {
+        if esp_rom_spiflash_erase_sector(sector as u32) == 0 {
+            wait_idle()
+        } else {
+            Err(MediumError::Erase)
+        }
+    })
 }
 
 #[link_section = ".rwtext"]
 fn erase_block_impl(block: usize) -> Result<(), MediumError> {
-    if esp_rom_spiflash_erase_block(block as u32) == 0 {
-        wait_idle()
-    } else {
-        Err(MediumError::Erase)
-    }
+    maybe_with_critical_section(|| {
+        if esp_rom_spiflash_erase_block(block as u32) == 0 {
+            wait_idle()
+        } else {
+            Err(MediumError::Erase)
+        }
+    })
 }
 
 pub struct InternalDriver<P: InternalPartition> {
