@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(async_fn_in_trait)]
 
+use embassy_futures::yield_now;
 use norfs_driver::{
     aligned::AlignedStorage,
     medium::{MediumError, WriteGranularity},
@@ -151,7 +152,11 @@ impl<P: InternalPartition> AlignedStorage for InternalDriver<P> {
         let offset = P::OFFSET / Self::BLOCK_SIZE;
         let block = offset + block;
 
-        erase_block_impl(block)
+        let result = erase_block_impl(block);
+
+        yield_now().await;
+
+        result
     }
 
     async fn read_aligned(
@@ -165,11 +170,15 @@ impl<P: InternalPartition> AlignedStorage for InternalDriver<P> {
 
         let offset = P::OFFSET + block * Self::BLOCK_SIZE + offset;
 
-        if esp_rom_spiflash_read(offset as u32, ptr, len) == 0 {
+        let result = if esp_rom_spiflash_read(offset as u32, ptr, len) == 0 {
             Ok(())
         } else {
             Err(MediumError::Read)
-        }
+        };
+
+        yield_now().await;
+
+        result
     }
 
     #[link_section = ".rwtext"]
@@ -186,7 +195,11 @@ impl<P: InternalPartition> AlignedStorage for InternalDriver<P> {
 
         let offset = P::OFFSET + block * Self::BLOCK_SIZE + offset;
 
-        write_impl(offset, ptr, len)
+        let result = write_impl(offset, ptr, len);
+
+        yield_now().await;
+
+        result
     }
 }
 
@@ -227,7 +240,11 @@ impl<P: InternalPartition> AlignedStorage for SmallInternalDriver<P> {
         let offset = P::OFFSET / Self::BLOCK_SIZE;
         let block = offset + block;
 
-        erase_sector_impl(block)
+        let result = erase_sector_impl(block);
+
+        yield_now().await;
+
+        result
     }
 
     async fn read_aligned(
@@ -241,11 +258,15 @@ impl<P: InternalPartition> AlignedStorage for SmallInternalDriver<P> {
 
         let offset = P::OFFSET + block * Self::BLOCK_SIZE + offset;
 
-        if esp_rom_spiflash_read(offset as u32, ptr, len) == 0 {
+        let result = if esp_rom_spiflash_read(offset as u32, ptr, len) == 0 {
             Ok(())
         } else {
             Err(MediumError::Read)
-        }
+        };
+
+        yield_now().await;
+
+        result
     }
 
     async fn write_aligned(
@@ -261,6 +282,10 @@ impl<P: InternalPartition> AlignedStorage for SmallInternalDriver<P> {
 
         let offset = P::OFFSET + block * Self::BLOCK_SIZE + offset;
 
-        write_impl(offset, ptr, len)
+        let result = write_impl(offset, ptr, len);
+
+        yield_now().await;
+
+        result
     }
 }
