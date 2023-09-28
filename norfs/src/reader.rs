@@ -13,7 +13,7 @@ pub struct Reader<M>
 where
     M: StorageMedium,
 {
-    meta: MetadataObjectHeader<M>,
+    pub(crate) meta: MetadataObjectHeader<M>,
     current_object: Option<ObjectReader<M>>,
 }
 
@@ -22,11 +22,21 @@ where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,
 {
-    pub(crate) fn new(meta: MetadataObjectHeader<M>) -> Self {
+    pub(crate) fn new(mut meta: MetadataObjectHeader<M>) -> Self {
+        meta.reset();
         Self {
             meta,
             current_object: None,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.meta.reset();
+        self.current_object = None;
+    }
+
+    pub(crate) fn into_meta(self) -> MetadataObjectHeader<M> {
+        self.meta
     }
 
     async fn select_next_object(&mut self, medium: &mut M) -> Result<(), StorageError> {

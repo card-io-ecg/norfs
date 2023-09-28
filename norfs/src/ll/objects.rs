@@ -638,7 +638,7 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
         self.object.location
     }
 
-    pub async fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.data_object_cursor = 0;
     }
 }

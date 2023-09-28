@@ -899,6 +899,8 @@ where
 #[cfg(test)]
 mod test {
 
+    use crate::read_dir::DirEntry;
+
     use super::*;
     use medium::{
         cache::ReadCache, ram::RamStorage, ram_aligned::AlignedNorRamStorage,
@@ -1210,6 +1212,27 @@ mod test {
 
             assert!(!storage.exists("foo").await);
             assert!(!storage.exists("bar").await);
+        }
+
+        async fn direntry_can_be_reconstructed_from_reader<M: StorageMedium>(
+            mut storage: Storage<M>,
+        ) {
+            storage.store("foo", b"bar", OnCollision::Overwrite).await.expect("Create failed");
+
+            let mut files = storage.read_dir().await.expect("Failed to list files");
+
+            let mut buffer = [0u8; 32];
+            while let Some(file) = files.next(&mut storage).await.unwrap() {
+                let mut reader = file.open();
+
+                let len = reader.read(&mut storage, &mut buffer).await.expect("Failed to read");
+                assert_eq!(&buffer[..len], b"bar");
+
+                let file = DirEntry::from_reader(reader);
+                file.delete(&mut storage).await.expect("Failed to delete file");
+            }
+
+            assert!(!storage.exists("foo").await);
         }
 
         async fn can_reuse_space_of_deleted_files<M: StorageMedium>(

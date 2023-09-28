@@ -47,8 +47,15 @@ where
         core::str::from_utf8(&buffer[..read]).map_err(|_| StorageError::FsCorrupted)
     }
 
-    pub async fn open(self) -> Reader<M> {
+    pub fn open(self) -> Reader<M> {
         Reader::new(self.metadata)
+    }
+
+    /// Reconstructs a DirEntry from a Reader.
+    pub fn from_reader(reader: Reader<M>) -> Self {
+        Self {
+            metadata: reader.into_meta(),
+        }
     }
 
     pub async fn delete(self, storage: &mut Storage<M>) -> Result<(), StorageError> {
