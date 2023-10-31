@@ -3,7 +3,7 @@
 #![feature(impl_trait_projections)]
 #![feature(generic_const_exprs)] // Eww
 #![feature(maybe_uninit_uninit_array, maybe_uninit_array_assume_init)]
-#![allow(incomplete_features)]
+#![allow(incomplete_features, stable_features, async_fn_in_trait, unknown_lints)]
 
 use core::fmt::Debug;
 
@@ -69,9 +69,10 @@ pub enum StorageError {
     InsufficientBuffer,
 }
 
-impl embedded_io::Error for StorageError {
-    fn kind(&self) -> embedded_io::ErrorKind {
-        embedded_io::ErrorKind::Other
+impl embedded_io_async::Error for StorageError {
+    fn kind(&self) -> embedded_io_async::ErrorKind {
+        // TODO use other ErrorKind variants
+        embedded_io_async::ErrorKind::Other
     }
 }
 

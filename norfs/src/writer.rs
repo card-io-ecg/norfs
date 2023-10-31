@@ -255,7 +255,7 @@ where
     }
 }
 
-impl<M> embedded_io::Io for BoundWriter<'_, M>
+impl<M> embedded_io_async::ErrorType for BoundWriter<'_, M>
 where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,
@@ -263,7 +263,7 @@ where
     type Error = StorageError;
 }
 
-impl<M> embedded_io::asynch::Write for BoundWriter<'_, M>
+impl<M> embedded_io_async::Write for BoundWriter<'_, M>
 where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,

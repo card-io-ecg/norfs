@@ -2,11 +2,7 @@ pub mod impls;
 
 use core::convert::Infallible;
 
-use embedded_io::{
-    asynch::{Read, Write},
-    blocking::ReadExactError,
-    Error,
-};
+use embedded_io_async::{Error, Read, ReadExactError, Write};
 
 use crate::{medium::StorageMedium, writer::FileDataWriter, StorageError};
 
@@ -74,7 +70,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use embedded_io::asynch::{Read, Write};
+    use embedded_io_async::{Read, Write};
 
     use crate::{
         storable::{Loadable, Storable},

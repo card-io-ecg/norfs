@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 
-use embedded_io::asynch::{Read, Write};
+use embedded_io_async::{Read, Write};
 
 use crate::storable::{LoadError, Loadable, Storable};
 

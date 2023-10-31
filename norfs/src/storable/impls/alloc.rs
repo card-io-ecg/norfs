@@ -1,5 +1,5 @@
 use crate::storable::{LoadError, Loadable, Storable};
-use embedded_io::asynch::{Read, Write};
+use embedded_io_async::{Read, Write};
 
 use alloc::boxed::Box;
 use alloc::string::String;

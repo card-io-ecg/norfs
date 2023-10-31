@@ -1,6 +1,6 @@
 use core::convert::Infallible;
 
-use embedded_io::asynch::{Read, Write};
+use embedded_io_async::{Read, Write};
 
 use crate::storable::{ConversionError, LoadError, Loadable, Storable};
 

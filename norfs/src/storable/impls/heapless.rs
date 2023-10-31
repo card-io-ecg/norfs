@@ -1,5 +1,5 @@
 use crate::storable::{LoadError, Loadable, Storable};
-use embedded_io::asynch::{Read, Write};
+use embedded_io_async::{Read, Write};
 
 impl<T, const N: usize> Loadable for heapless::Vec<T, N>
 where

@@ -1,4 +1,4 @@
-use embedded_io::blocking::ReadExactError;
+use embedded_io_async::ReadExactError;
 
 use crate::{
     debug,
@@ -166,7 +166,7 @@ where
     }
 }
 
-impl<M> embedded_io::Io for BoundReader<'_, M>
+impl<M> embedded_io_async::ErrorType for BoundReader<'_, M>
 where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,
@@ -174,7 +174,7 @@ where
     type Error = StorageError;
 }
 
-impl<M> embedded_io::asynch::Read for BoundReader<'_, M>
+impl<M> embedded_io_async::Read for BoundReader<'_, M>
 where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,
