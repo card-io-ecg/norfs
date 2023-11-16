@@ -5,4 +5,5 @@ members = [
     "norfs",
     "norfs-driver",
     "norfs-esp32s3",
+    "norfs-esp32c6",
 ]
