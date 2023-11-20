@@ -53,7 +53,7 @@ rom_fn!(
     fn esp_rom_spiflash_unlock() -> i32 = 0x40000154,
     fn esp_rom_spiflash_erase_block(block_number: u32) -> i32 = 0x40000148,
     fn esp_rom_spiflash_erase_sector(block_number: u32) -> i32 = 0x40000144,
-    fn esp_rom_spiflash_write(dest_addr: u32, data: *const u32, len: u32) -> i32 = 0x40000188,
+    fn esp_rom_spiflash_write(dest_addr: u32, data: *const u32, len: u32) -> i32 = 0x4000014c,
     fn esp_rom_spiflash_read_user_cmd(status: *mut u32, cmd: u8) -> i32 = 0x40000164
 );
 
