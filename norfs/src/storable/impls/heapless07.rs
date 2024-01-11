@@ -1,14 +1,14 @@
 use crate::storable::{LoadError, Loadable, Storable};
 use embedded_io_async::{Read, Write};
 
-impl<T, const N: usize> Loadable for heapless::Vec<T, N>
+impl<T, const N: usize> Loadable for heapless07::Vec<T, N>
 where
     T: Loadable,
 {
     async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let count = usize::load(reader).await?;
 
-        let mut vec = heapless::Vec::new();
+        let mut vec = heapless07::Vec::new();
 
         for _ in 0..count {
             vec.push(T::load(reader).await?)
@@ -19,7 +19,7 @@ where
     }
 }
 
-impl<T, const N: usize> Storable for heapless::Vec<T, N>
+impl<T, const N: usize> Storable for heapless07::Vec<T, N>
 where
     T: Storable,
 {
@@ -34,11 +34,11 @@ where
     }
 }
 
-impl<const N: usize> Loadable for heapless::String<N> {
+impl<const N: usize> Loadable for heapless07::String<N> {
     async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
         let count = usize::load(reader).await?;
 
-        let mut string = heapless::String::new();
+        let mut string = heapless07::String::new();
 
         {
             let vec = unsafe { string.as_mut_vec() };
@@ -56,7 +56,7 @@ impl<const N: usize> Loadable for heapless::String<N> {
     }
 }
 
-impl<const N: usize> Storable for heapless::String<N> {
+impl<const N: usize> Storable for heapless07::String<N> {
     async fn store<W: Write>(&self, writer: &mut W) -> Result<(), W::Error> {
         self.len().store(writer).await?;
 

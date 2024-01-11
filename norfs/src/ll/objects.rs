@@ -337,8 +337,8 @@ pub struct ObjectLocation {
 }
 
 impl ObjectLocation {
-    pub fn into_bytes<M: StorageMedium>(self) -> heapless::Vec<u8, 8> {
-        let mut bytes = heapless::Vec::<u8, 8>::new();
+    pub fn into_bytes<M: StorageMedium>(self) -> heapless08::Vec<u8, 8> {
+        let mut bytes = heapless08::Vec::<u8, 8>::new();
 
         bytes
             .extend_from_slice(&self.block.to_le_bytes()[..M::block_count_bytes()])
@@ -646,7 +646,7 @@ impl<M: StorageMedium> MetadataObjectHeader<M> {
 pub struct ObjectWriter<M: StorageMedium> {
     object: ObjectHeader,
     cursor: usize,
-    buffer: heapless::Vec<u8, 4>, // TODO: support larger word sizes?
+    buffer: heapless08::Vec<u8, 4>, // TODO: support larger word sizes?
     _medium: PhantomData<M>,
 }
 
@@ -659,7 +659,7 @@ impl<M: StorageMedium> ObjectWriter<M> {
         Ok(Self {
             object: ObjectHeader::allocate(medium, location, object_type).await?,
             cursor: 0,
-            buffer: heapless::Vec::new(),
+            buffer: heapless08::Vec::new(),
             _medium: PhantomData,
         })
     }
