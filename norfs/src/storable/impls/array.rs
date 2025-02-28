@@ -9,7 +9,7 @@ where
     T: Loadable,
 {
     async fn load<R: Read>(reader: &mut R) -> Result<Self, LoadError<R::Error>> {
-        let mut array = MaybeUninit::uninit_array::<N>();
+        let mut array = [const { MaybeUninit::uninit() }; N];
 
         for idx in 0..N {
             array[idx].write(T::load(reader).await?);

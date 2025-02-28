@@ -1,6 +1,4 @@
 #![no_std]
-#![feature(async_fn_in_trait)]
-#![allow(stable_features, async_fn_in_trait, unknown_lints)]
 
 use embassy_futures::yield_now;
 use norfs_driver::{
