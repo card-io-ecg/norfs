@@ -1,5 +1,3 @@
-use embedded_io_async::ReadExactError;
-
 use crate::{
     debug,
     ll::objects::{MetadataObjectHeader, ObjectReader},
@@ -183,11 +181,14 @@ where
         Reader::read(self.reader, self.storage, buf).await
     }
 
-    async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ReadExactError<Self::Error>> {
+    async fn read_exact(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Result<(), embedded_io_async::ReadExactError<Self::Error>> {
         match Reader::read_all(self.reader, self.storage, buf).await {
             Ok(_) => Ok(()),
-            Err(StorageError::EndOfFile) => Err(ReadExactError::UnexpectedEof),
-            Err(e) => Err(ReadExactError::Other(e)),
+            Err(StorageError::EndOfFile) => Err(embedded_io_async::ReadExactError::UnexpectedEof),
+            Err(e) => Err(embedded_io_async::ReadExactError::Other(e)),
         }
     }
 }

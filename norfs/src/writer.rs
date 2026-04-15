@@ -1,3 +1,5 @@
+use core::future::Future;
+
 use crate::{
     debug, hash_path,
     ll::{
@@ -151,6 +153,10 @@ where
         Ok(())
     }
 
+    pub fn flush(&mut self) -> impl Future<Output = Result<(), StorageError>> {
+        core::future::ready(Ok(()))
+    }
+
     pub async fn create(
         path: &str,
         storage: &mut Storage<M>,
@@ -246,12 +252,22 @@ where
     M: StorageMedium,
     [(); M::BLOCK_COUNT]:,
 {
-    pub async fn write(&mut self, buf: &[u8]) -> Result<usize, StorageError> {
-        self.writer.write(buf, self.storage).await
+    pub fn write<'a>(
+        &'a mut self,
+        buf: &'a [u8],
+    ) -> impl Future<Output = Result<usize, StorageError>> + 'a {
+        self.writer.write(buf, self.storage)
     }
 
-    pub async fn write_all(&mut self, buf: &[u8]) -> Result<(), StorageError> {
-        self.writer.write_all(buf, self.storage).await
+    pub fn write_all<'a>(
+        &'a mut self,
+        buf: &'a [u8],
+    ) -> impl Future<Output = Result<(), StorageError>> + 'a {
+        self.writer.write_all(buf, self.storage)
+    }
+
+    pub fn flush<'a>(&'a mut self) -> impl Future<Output = Result<(), StorageError>> + 'a {
+        self.writer.flush()
     }
 }
 
@@ -274,5 +290,9 @@ where
 
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         BoundWriter::write_all(self, buf).await
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        BoundWriter::flush(self).await
     }
 }

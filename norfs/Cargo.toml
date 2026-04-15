@@ -14,7 +14,8 @@ keywords = ["embedded", "no-std", "filesystem", "flash"]
 [dependencies]
 norfs-driver = { path = "../norfs-driver" }
 
-embedded-io-async = { version = "0.6.0" }
+docsplay = { version = "0.1", default-features = false }
+embedded-io-async = "0.7.0"
 heapless07 = { package = "heapless", version = "0.7" }
 heapless08 = { package = "heapless", version = "0.8" }
 heapless09 = { package = "heapless", version = "0.9" }

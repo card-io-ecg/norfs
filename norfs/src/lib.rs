@@ -39,7 +39,7 @@ mod logger;
 extern crate alloc;
 
 /// Error values returned by storage operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, docsplay::Display)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum StorageError {
     /// The file does not exist.
@@ -73,6 +73,8 @@ impl embedded_io_async::Error for StorageError {
         embedded_io_async::ErrorKind::Other
     }
 }
+
+impl core::error::Error for StorageError {}
 
 impl From<MediumError> for StorageError {
     fn from(_: MediumError) -> Self {
